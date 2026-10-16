@@ -1,0 +1,1 @@
+"""Payments receipt worker."""

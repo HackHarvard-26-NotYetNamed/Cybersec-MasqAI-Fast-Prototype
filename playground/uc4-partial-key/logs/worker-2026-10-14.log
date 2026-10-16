@@ -1,0 +1,10 @@
+2026-10-14T01:58:02Z INFO  payments-worker starting replicas=2 queue=receipts
+2026-10-14T01:58:02Z INFO  llm client ready base=https://openrouter.ai/api key={{UC4_PARTIAL_LONG}}
+2026-10-14T02:00:11Z INFO  receipt rendered order=88213 tokens=412
+2026-10-14T02:04:47Z INFO  receipt rendered order=88214 tokens=398
+2026-10-14T02:13:00Z WARN  llm auth failed status=401 key={{UC4_PARTIAL_LONG}} attempt=1
+2026-10-14T02:13:02Z WARN  llm auth failed status=401 key={{UC4_PARTIAL_LONG}} attempt=2
+2026-10-14T02:13:06Z ERROR llm auth failed status=401 key={{UC4_PARTIAL_SHORT}} attempt=3 giving up
+2026-10-14T02:13:06Z ERROR receipt failed order=88215 reason="upstream 401 Unauthorized"
+2026-10-14T02:20:41Z ERROR receipt failed order=88216 reason="upstream 401 Unauthorized"
+2026-10-14T02:31:15Z ERROR receipt failed order=88217 reason="upstream 401 Unauthorized"

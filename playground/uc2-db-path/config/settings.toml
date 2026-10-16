@@ -1,0 +1,14 @@
+# Acme inventory runtime settings. Owned by ops; do not commit changes to [database].
+
+[service]
+name = "acme-inventory"
+environment = "production"
+log_level = "info"
+
+[database]
+# Production SQLite file on the warehouse box.
+path = '{{DB_PATH}}'
+busy_timeout_ms = 5000
+
+[reorder]
+default_reorder_level = 10

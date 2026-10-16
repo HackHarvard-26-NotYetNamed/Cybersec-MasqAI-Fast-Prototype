@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Test / tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Local config and secrets (see masqai.json.example)
+masqai.json
+.env
+.env.*
+!.env.example
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Playground generated artifacts
+playground/.state/
+playground/uc1-env-dump/out/
+playground/uc1-env-dump/.ledger-jdk
+playground/uc3-secret-roundtrip/config/secrets.json
+
+# Logs (keep the playground fixture log)
+*.log
+!playground/uc4-partial-key/logs/*.log

@@ -1,0 +1,7 @@
+{
+  "service": "payments-worker",
+  "environment": "production",
+  "replicas": 2,
+  "key_ref": "staging",
+  "queue": "receipts"
+}

@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MasqAI · Local gateway</title>
+<style>
+:root{color-scheme:dark;font:13px/1.4 system-ui,sans-serif;background:#0b1020;color:#e3e9fa;
+  --line:#26314a;--panel:#111a2c;--panel2:#0e1627;--field:#162138;--edge:#364767;--muted:#8fa1c2;--accent:#6be5c0;--bad:#ff8fa3;--warn:#ffd27a;--info:#8ab4ff;
+  --del:#4a2232;--del-fg:#ffd0d8;--ins:#123d37;--ins-fg:#b5ffe8;--mono:12px/1.45 Consolas,"Cascadia Mono",monospace}
+*{box-sizing:border-box}body{margin:0}
+button,select,input,textarea{background:var(--field);color:inherit;border:1px solid var(--edge);border-radius:6px;padding:5px 8px;font:inherit}
+button{cursor:pointer}button:hover{border-color:var(--accent)}button:disabled{opacity:.45;cursor:default}
+button.primary{background:#1d5b4c;border-color:var(--accent)}button.danger:hover{border-color:var(--bad)}button.small{padding:2px 7px;font-size:12px}
+button.link{background:none;border:0;padding:0;color:var(--info);text-decoration:underline dotted;cursor:pointer;font:inherit}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
+small,.muted{color:var(--muted)}code{font:var(--mono);background:#0b1020;padding:0 4px;border-radius:4px}
+h2,h3{margin:0}
+.view[hidden]{display:none}
+/* top bar */
+.top{height:44px;padding:0 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;position:sticky;top:0;background:#0b1020f2;z-index:5;backdrop-filter:blur(4px)}
+.top h1{margin:0;font-size:16px;white-space:nowrap}.top h1 span{color:var(--muted);font-weight:400;font-size:12px;margin-left:6px}
+.tabs{display:flex;gap:2px;height:100%}
+.tabs button{border:0;border-bottom:2px solid transparent;border-radius:0;background:none;padding:0 12px;height:100%;color:var(--muted)}
+.tabs button:hover{color:inherit}.tabs button[aria-selected=true]{color:inherit;border-bottom-color:var(--accent)}
+.tabs .count{display:inline-block;min-width:16px;margin-left:5px;padding:0 5px;border-radius:9px;background:#213653;font-size:11px;color:#c9d5ee}
+.tabs .count.live{background:#5a4a14;color:var(--warn)}.tabs .count.bad{background:#5a2232;color:var(--bad)}
+.grow{flex:1}
+#status{font-size:12px;color:var(--muted)}#status::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--muted);margin-right:6px;vertical-align:1px}
+#status.live{color:var(--accent)}#status.live::before{background:var(--accent)}#status.down{color:var(--warn)}#status.down::before{background:var(--warn)}
+/* shared three-column page layout */
+.page{display:grid;grid-template-columns:230px minmax(0,1fr);height:calc(100vh - 44px)}
+.page.with-side{grid-template-columns:230px minmax(0,1fr) 300px}
+.page>aside,.page>main,.page>.side{overflow:auto;min-width:0}
+.page>aside{border-right:1px solid var(--line);background:var(--panel2)}
+.page>.side{border-left:1px solid var(--line);background:var(--panel2)}
+.page>main{padding:0 0 40px}
+.list-head{padding:8px 10px;display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel2);z-index:1}
+.list-head strong{flex:1}
+.list-foot{padding:8px 10px;font-size:11.5px;color:var(--muted)}
+.entry{display:block;width:100%;text-align:left;border:0;border-bottom:1px solid #1a2440;border-left:3px solid transparent;border-radius:0;background:none;padding:6px 9px}
+.entry:hover{background:#131d33}.entry.active{background:#16233d;border-left-color:var(--accent)}
+.entry .l1{display:flex;gap:6px;align-items:center}.entry .l1 b{font:600 12px Consolas,monospace;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.entry .l2{font-size:11.5px;color:var(--muted);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;padding:8px 14px;border-bottom:1px solid var(--line);background:var(--panel2);position:sticky;top:0;z-index:2}
+.bar h2{font:600 14px Consolas,monospace}
+.bar label{display:flex;gap:5px;align-items:center;font-size:12px;color:var(--muted)}.bar input[type=checkbox]{accent-color:var(--accent);margin:0}
+.bar input[type=search]{width:180px;padding:3px 7px}
+.stats{display:flex;flex-wrap:wrap;gap:4px}
+.pill{display:inline-block;padding:0 7px;border-radius:9px;font-size:11px;line-height:17px;background:#1b2742;color:#c9d5ee;white-space:nowrap;border:1px solid transparent}
+.pill.ok{background:#123d37;color:var(--accent)}.pill.bad{background:#4a2232;color:var(--bad)}.pill.warn{background:#4a3d14;color:var(--warn)}
+.pill.info{background:#1a2c50;color:var(--info)}.pill.dim{background:none;border-color:var(--line);color:var(--muted)}
+.pill.run{background:#4a3d14;color:var(--warn)}.pill.run::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--warn);margin-right:5px;vertical-align:1px;animation:blink 1s infinite}
+@keyframes blink{50%{opacity:.25}}
+.empty{padding:40px 20px;text-align:center;color:var(--muted)}
+.legend{display:flex;flex-wrap:wrap;gap:4px 12px;padding:6px 14px;font-size:11.5px;color:var(--muted);border-bottom:1px solid var(--line)}
+.legend mark,.legend .sw{font-size:11px}
+.sw{display:inline-block;padding:0 5px;border-radius:3px}.sw.del{background:var(--del);color:var(--del-fg)}.sw.ins{background:var(--ins);color:var(--ins-fg)}
+/* text blocks */
+pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;padding:6px 8px;font:var(--mono)}
+pre .ln{display:block;min-height:1.45em}
+pre .ln.del{background:var(--del);color:var(--del-fg)}pre .ln.ins{background:var(--ins);color:var(--ins-fg)}
+pre.numbered .ln{padding-left:3.4em;text-indent:-3.4em}pre.numbered i{display:inline-block;width:3em;margin-right:.4em;text-indent:0;text-align:right;color:#56688a;font-style:normal;user-select:none}
+mark{border-radius:3px;padding:0 2px;color:inherit}
+mark.secret{background:#6b2a3c;color:#ffe0e6;outline:1px solid #a54a62}
+mark.kept{background:none;color:inherit;outline:1px dashed #a5864a}
+mark.ph{background:#18485b;color:#bdf0ff;outline:1px solid #2f7d97}
+mark.ph.alias{background:#3b2f63;color:#e0d4ff;outline-color:#6d5bb0}
+mark.block{background:#4a3d14;color:var(--warn);outline:1px solid #8a7224}
+.gap{display:block;width:100%;text-align:center;font:11px system-ui;color:var(--muted);background:#0d1526;border:0;border-top:1px dashed var(--line);border-bottom:1px dashed var(--line);border-radius:0;padding:2px}
+.gap:hover{color:var(--info)}
+/* context items */
+.item{margin:8px 14px;border:1px solid var(--line);border-radius:7px;background:var(--panel);overflow:hidden}
+.item.changed{border-color:#2b5a52}
+.item>header{display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center;padding:4px 8px;background:#0f182b;border-bottom:1px solid var(--line);font-size:12px}
+.item>header .idx{font:600 11px Consolas,monospace;color:var(--muted);min-width:24px}
+.item>header .role{font-weight:600}.item>header .kind{color:var(--muted)}
+.item>header .note{color:var(--muted);font-size:11.5px;margin-left:auto}
+.cols{display:grid;grid-template-columns:1fr 1fr}
+.cols>div{min-width:0}.cols>div+div{border-left:1px solid var(--line)}
+.cols.head{position:sticky;top:41px;z-index:1;background:#0b1020;border-bottom:1px solid var(--line);margin:0;font-size:11.5px;color:var(--muted)}
+.cols.head>div{padding:4px 22px}
+.same{position:relative}.same .tag{position:absolute;right:8px;top:4px;font-size:11px;color:var(--muted)}
+.dgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);font:var(--mono);padding:4px 0}
+.dgrid>.ln{white-space:pre-wrap;overflow-wrap:anywhere;padding:0 8px;min-height:1.45em}
+.dgrid>.ln.l{border-right:1px solid var(--line)}
+.dgrid>.ln.del{background:var(--del);color:var(--del-fg)}.dgrid>.ln.ins{background:var(--ins);color:var(--ins-fg)}
+.dgrid>.ln.fill{background:repeating-linear-gradient(135deg,transparent 0 4px,#ffffff08 4px 8px)}
+.dgrid>.span2{grid-column:1/-1}
+.divider{margin:14px 14px 4px;font-size:11.5px;color:var(--muted);display:flex;align-items:center;gap:8px}.divider::after{content:"";flex:1;border-top:1px solid var(--line)}
+/* mapping table (right side) */
+.side h3{font-size:12.5px;padding:8px 10px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel2)}
+table{border-collapse:collapse;width:100%;font-size:12px}
+th,td{text-align:left;padding:3px 8px;border-bottom:1px solid #1a2440;vertical-align:top}
+th{color:var(--muted);font-weight:500;font-size:11px;position:sticky;top:0;background:var(--panel2)}
+td.mono,td code,.mono{font:var(--mono);overflow-wrap:anywhere}
+td .aliases{color:var(--muted);font-size:11px}
+/* security page */
+.sec{padding:10px 14px;display:flex;flex-direction:column;gap:10px}
+.banner{padding:7px 10px;border-radius:6px;border:1px solid var(--line);font-size:12.5px}
+.banner.bad{border-color:#7a3448;background:#2a1520;color:#ffd0d8}.banner.ok{border-color:#2b5a52;background:#0f2723}.banner.warn{border-color:#6a5720;background:#251f0e}.banner.dim{color:var(--muted)}
+.banner b{font-weight:600}
+.flow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.step{border:1px solid var(--line);border-radius:6px;padding:6px 9px;background:var(--panel);font-size:12px;position:relative}
+.step .n{font-weight:600;display:flex;justify-content:space-between;gap:6px}.step .d{color:var(--muted);font-size:11.5px;margin-top:2px}
+.step.done{border-color:#2b5a52}.step.done .n::after{content:"✓";color:var(--accent)}
+.step.fail{border-color:#7a3448;background:#1f1219}.step.fail .n::after{content:"✕";color:var(--bad)}
+.step.run{border-color:#6a5720}.step.run .n::after{content:"…";color:var(--warn)}
+.step.skip{opacity:.55}.step.skip .n::after{content:"–";color:var(--muted)}
+.card{border:1px solid var(--line);border-radius:7px;background:var(--panel);overflow:hidden}
+.card>h3{display:flex;gap:8px;align-items:center;font-size:13px;padding:6px 10px;background:#0f182b;border-bottom:1px solid var(--line)}
+.card>h3 .sub{font-weight:400;color:var(--muted);font-size:11.5px}
+.card>.body{padding:6px 10px}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:2px 14px;font-size:12px}.kv dt{color:var(--muted)}.kv dd{margin:0;overflow-wrap:anywhere}
+.fold{border-top:1px solid #1a2440}.fold:first-child{border-top:0}
+.fold>summary{cursor:pointer;padding:5px 10px;font-size:12px;list-style:none;display:flex;gap:6px;align-items:center}
+.fold>summary::before{content:"▸";color:var(--muted);width:10px}.fold[open]>summary::before{content:"▾"}
+.fold>summary:hover{background:#131d33}
+.fold>pre,.fold>.inner{border-top:1px solid #1a2440;background:var(--panel2)}
+.fold>.inner{padding:4px 0}
+.meter{height:4px;background:#1b2742;border-radius:2px;overflow:hidden;margin-top:6px}.meter>div{height:100%;background:var(--warn);transition:width .25s linear}
+.op{border-top:1px solid #1a2440;padding:6px 10px}.op:first-child{border-top:0}
+.op.rejected{background:#1f1219}
+.op .what{font-size:12px;margin-bottom:4px}
+/* config panel (density pass) */
+.config{display:grid;grid-template-columns:190px 1fr;min-height:calc(100vh - 44px)}
+.config nav{padding:10px;border-right:1px solid var(--line);position:sticky;top:44px;align-self:start;background:var(--panel2);height:calc(100vh - 44px)}
+.config nav strong{display:block;padding:2px 8px 6px}
+.config nav a{display:block;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:5px}
+.config nav a:hover,.config nav a.current{color:inherit;background:var(--field)}
+.config nav a .count{float:right;color:var(--bad);font-size:11px}
+.config main{padding:0 22px 90px;max-width:1000px}
+.config h2{margin:18px 0 2px;font-size:15px}.config h2+p{margin:0 0 8px;color:var(--muted)}
+.config .card{padding:8px 12px;margin:8px 0;overflow:visible}
+.card-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:4px}
+.card-head strong{font-size:13.5px}
+.field{display:grid;grid-template-columns:180px 1fr;gap:3px 16px;padding:7px 0;border-top:1px solid #1b2540}
+.field:first-of-type{border-top:0}
+.field>label{font-weight:600;padding-top:5px}
+.field .control{display:flex;flex-direction:column;gap:4px;min-width:0}
+.field .control input[type=text],.field .control input[type=number],.field .control select,.field .control textarea{width:100%}
+.field .control textarea{min-height:130px;font:var(--mono);resize:vertical}
+.help{color:var(--muted);font-size:12px}.help b{color:#c9d5ee;font-weight:600}
+.error{color:var(--bad);font-size:12px}.error:empty{display:none}
+.field.invalid input,.field.invalid select,.field.invalid textarea{border-color:var(--bad)}
+.warn{color:var(--warn);font-size:12px}.ok{color:var(--accent);font-size:12px}
+.check{display:flex;align-items:center;gap:7px;padding-top:4px}.check input{width:15px;height:15px;accent-color:var(--accent)}
+.rows{display:flex;flex-direction:column;gap:5px}.row{display:flex;gap:6px;align-items:center}.row input{flex:1;min-width:0}
+.radio{display:flex;flex-direction:column;gap:4px;padding-top:4px}.radio label{display:flex;gap:7px;align-items:baseline;font-weight:400}
+.chips{display:flex;flex-wrap:wrap;gap:4px}.chip{background:#1b2742;border:1px solid var(--edge);border-radius:20px;padding:1px 8px;font:11.5px Consolas,monospace}
+.savebar{position:fixed;left:0;right:0;bottom:0;background:#0e1628f2;border-top:1px solid var(--line);padding:8px 22px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;backdrop-filter:blur(4px);z-index:6}
+#saveState{flex:1}#saveState.dirty{color:var(--warn)}#saveState.bad{color:var(--bad)}
+dialog{background:var(--panel);color:inherit;border:1px solid var(--edge);border-radius:10px;width:min(820px,95vw)}
+dialog textarea{width:100%;height:55vh;font:var(--mono)}
+.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+@media(max-width:1200px){.page.with-side{grid-template-columns:210px minmax(0,1fr)}.page.with-side>.side{grid-column:1/-1;border-left:0;border-top:1px solid var(--line);max-height:40vh}}
+@media(max-width:900px){.page,.page.with-side{grid-template-columns:1fr;height:auto}.page>aside{max-height:30vh;border-right:0;border-bottom:1px solid var(--line)}
+  .config{grid-template-columns:1fr}.config nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}
+  .cols{grid-template-columns:1fr}.cols>div+div{border-left:0;border-top:1px solid var(--line)}.cols.head{display:none}.flow{grid-template-columns:1fr 1fr}
+  .field{grid-template-columns:1fr}.field>label{padding-top:0}}
+</style>
+</head>
+<body>
+<div class="top">
+  <h1>MasqAI<span>local gateway</span></h1>
+  <div class="tabs" role="tablist">
+    <button role="tab" id="tabContext" aria-selected="true" aria-controls="viewContext">Context<span class="count" id="countContext">0</span></button>
+    <button role="tab" id="tabSecurity" aria-selected="false" aria-controls="viewSecurity">Security model<span class="count" id="countSecurity">0</span></button>
+    <button role="tab" id="tabConfig" aria-selected="false" aria-controls="viewConfig">Configuration</button>
+  </div>
+  <span class="grow"></span>
+  <span id="status">Connecting…</span>
+</div>
+
+<!-- Context: what the agent sent (left) versus what left this machine (right) -->
+<div id="viewContext" class="view page with-side" role="tabpanel">
+  <aside>
+    <div class="list-head"><strong>Sessions</strong><span class="muted" id="sessionCount"></span></div>
+    <div id="sessions"></div>
+    <div class="list-foot">RAM only · cleared on restart. A session is one agent conversation, matched by session hints or shared history.</div>
+  </aside>
+  <main id="contextMain"></main>
+  <div class="side" id="contextSide"></div>
+</div>
+
+<!-- Security model: each sanitize pass, its input, its answer, and what was applied -->
+<div id="viewSecurity" class="view page" role="tabpanel" hidden>
+  <aside>
+    <div class="list-head"><strong>Calls</strong><label class="muted" title="Select each new call as it starts"><input type="checkbox" id="followLatest" checked> follow</label></div>
+    <div class="list-head" style="top:37px;gap:8px;font-size:12px">
+      <select id="traceSession" style="flex:1;min-width:0;padding:2px 4px;font-size:12px"></select>
+      <label class="muted" title="Hide passes where the security model was not called"><input type="checkbox" id="hideSkipped"> hide skipped</label>
+    </div>
+    <div id="traces"></div>
+    <div class="list-foot">Last 100 passes, RAM only. Includes raw context: never logged or written to disk.</div>
+  </aside>
+  <main id="securityMain"></main>
+</div>
+
+<div id="viewConfig" class="view config" role="tabpanel" hidden>
+  <nav id="configNav"></nav>
+  <main id="configForm"></main>
+  <div class="savebar" id="savebar" hidden>
+    <span id="saveState">No changes.</span>
+    <button id="exportConfig">Export JSON…</button>
+    <button id="revertConfig" class="danger">Discard changes</button>
+    <button id="applyConfig" class="primary">Apply</button>
+  </div>
+</div>
+
+<dialog id="exportDialog">
+  <h2>Export configuration</h2>
+  <p class="muted">The panel applies changes in memory only; they are lost on restart. To keep them, save this JSON as <code>masqai.json</code> (or the file named by <code>MASQAI_CONFIG</code>). It contains environment variable <em>names</em>, never key values.</p>
+  <textarea id="exportText" readonly spellcheck="false"></textarea>
+  <div class="toolbar"><button id="copyExport">Copy</button><button id="downloadExport">Download masqai.json</button><button id="closeExport">Close</button></div>
+</dialog>
+
+<script src="/static/ui.js"></script>
+<script src="/static/config.js"></script>
+<script src="/static/context.js"></script>
+<script src="/static/security.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

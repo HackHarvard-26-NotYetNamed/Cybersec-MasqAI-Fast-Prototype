@@ -1,0 +1,18 @@
+{
+  "telegram": {
+    "bot_token": "{{UC5_BOT_TOKEN}}",
+    "team_chat_id": -1002213874410,
+    "owner_chat_id": {{UC5_OWNER_CHAT_ID}}
+  },
+  "owner": {
+    "name": "{{UC5_NAME}}",
+    "telegram": "{{UC5_HANDLE}}",
+    "email": "{{UC5_EMAIL}}",
+    "phone": "{{UC5_PHONE}}"
+  },
+  "schedule": {
+    "time": "09:30",
+    "timezone": "America/New_York",
+    "weekdays_only": true
+  }
+}

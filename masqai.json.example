@@ -1,0 +1,42 @@
+{
+  "host": "127.0.0.1",
+  "port": 8787,
+  "providers": [
+    {
+      "name": "openrouter",
+      "base_url": "https://openrouter.ai/api",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "format": "openai"
+    },
+    {
+      "name": "security-local",
+      "base_url": "http://127.0.0.1:11434",
+      "format": "openai"
+    }
+  ],
+  "routes": {
+    "anthropic/claude-sonnet": {"provider": "openrouter", "model": "anthropic/claude-sonnet-4"},
+    "openai/gpt-4o": {"provider": "openrouter", "model": "openai/gpt-4o"}
+  },
+  "default_route": {"provider": "openrouter"},
+  "security": {
+    "enabled": true,
+    "provider": "security-local",
+    "model": "qwen2.5:7b",
+    "api_format": "openai",
+    "context_mode": "recent",
+    "recent_items": 12,
+    "nearest_ops": -1,
+    "op_context_lines": 2,
+    "auto_mask": "auto"
+  },
+  "detectors": {
+    "detect_host_identifiers": true,
+    "custom_values": []
+  },
+  "headers": {
+    "mode": "blocklist",
+    "blocklist": ["api-key", "x-goog-api-key", "cookie"],
+    "allowlist": ["accept", "content-type", "user-agent", "openai-beta", "openai-organization", "openai-project", "anthropic-beta", "anthropic-version", "http-referer", "x-title", "x-stainless-*"]
+  }
+}

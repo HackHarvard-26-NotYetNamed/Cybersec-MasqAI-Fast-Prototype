@@ -1,0 +1,10 @@
+# OpenRouter keys, one per environment. Rotated by ops.
+
+[production]
+key = "{{UC4_PROD_KEY}}"
+monthly_budget_usd = 400
+
+[staging]
+# Load-test key. Revoked by ops on 2026-10-14 at 02:10 UTC after the load test.
+key = "{{UC4_STAGING_KEY}}"
+monthly_budget_usd = 25

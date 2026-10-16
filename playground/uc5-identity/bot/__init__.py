@@ -1,0 +1,1 @@
+"""Daily standup Telegram bot."""
