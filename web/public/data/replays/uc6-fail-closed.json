@@ -1,0 +1,77 @@
+{
+  "id": "uc6-fail-closed",
+  "title": "Fail closed",
+  "summary": "The local security model goes down mid-session. Every request is blocked with HTTP 502 and nothing reaches the relay: context is never sent raw.",
+  "relayRequestCount": 0,
+  "steps": [
+    {
+      "t": 0,
+      "role": "user",
+      "raw": "system: You are OpenCode. Platform: win32. Host: DESKTOP-7Q2XK9M.\nsystem: Working directory: C:\\Users\\alice\\masq-playground\\uc6-fail-closed\n\n[earlier in this session]\ntool · bash: python -m unittest discover -s tests -v\n  Ran 3 tests in 0.001s: OK\n\nuser: Now read deploy/README.md and summarise how the docs get deployed.",
+      "sanitized": "",
+      "entities": [
+        {
+          "type": "HOST",
+          "placeholder": "<HOST_6d2e81f0>",
+          "value": "DESKTOP-7Q2XK9M",
+          "op": "mask"
+        },
+        {
+          "type": "PATH",
+          "placeholder": "<PATH_3f1a9c02>",
+          "value": "C:\\Users\\alice",
+          "op": "mask"
+        }
+      ],
+      "toolCall": null,
+      "blocked": true,
+      "note": "Ollama was stopped: the security model is unreachable. The gateway answers HTTP 502 masqai_sanitization_error instead of forwarding."
+    },
+    {
+      "t": 4,
+      "role": "user",
+      "raw": "system: You are OpenCode. Platform: win32. Host: DESKTOP-7Q2XK9M.\nsystem: Working directory: C:\\Users\\alice\\masq-playground\\uc6-fail-closed\n\n[earlier in this session]\ntool · bash: python -m unittest discover -s tests -v\n  Ran 3 tests in 0.001s: OK\n\nuser: Now read deploy/README.md and summarise how the docs get deployed.\n\n(retry 1 of 2)",
+      "sanitized": "",
+      "entities": [
+        {
+          "type": "HOST",
+          "placeholder": "<HOST_6d2e81f0>",
+          "value": "DESKTOP-7Q2XK9M",
+          "op": "mask"
+        },
+        {
+          "type": "PATH",
+          "placeholder": "<PATH_3f1a9c02>",
+          "value": "C:\\Users\\alice",
+          "op": "mask"
+        }
+      ],
+      "toolCall": null,
+      "blocked": true,
+      "note": "The agent retries. Still no security model, still blocked."
+    },
+    {
+      "t": 9,
+      "role": "user",
+      "raw": "system: You are OpenCode. Platform: win32. Host: DESKTOP-7Q2XK9M.\nsystem: Working directory: C:\\Users\\alice\\masq-playground\\uc6-fail-closed\n\n[earlier in this session]\ntool · bash: python -m unittest discover -s tests -v\n  Ran 3 tests in 0.001s: OK\n\nuser: Now read deploy/README.md and summarise how the docs get deployed.\n\n(retry 2 of 2)",
+      "sanitized": "",
+      "entities": [
+        {
+          "type": "HOST",
+          "placeholder": "<HOST_6d2e81f0>",
+          "value": "DESKTOP-7Q2XK9M",
+          "op": "mask"
+        },
+        {
+          "type": "PATH",
+          "placeholder": "<PATH_3f1a9c02>",
+          "value": "C:\\Users\\alice",
+          "op": "mask"
+        }
+      ],
+      "toolCall": null,
+      "blocked": true,
+      "note": "The agent gives up and shows masqai_sanitization_error. The relay received nothing."
+    }
+  ]
+}

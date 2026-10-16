@@ -1,0 +1,34 @@
+{
+  "replays": [
+    {
+      "id": "uc1-env-dump",
+      "title": "Environment dump",
+      "file": "uc1-env-dump.json"
+    },
+    {
+      "id": "uc2-db-path",
+      "title": "Production DB path",
+      "file": "uc2-db-path.json"
+    },
+    {
+      "id": "uc3-secret-roundtrip",
+      "title": "Secret round trip",
+      "file": "uc3-secret-roundtrip.json"
+    },
+    {
+      "id": "uc4-partial-key",
+      "title": "Partial key, then full key",
+      "file": "uc4-partial-key.json"
+    },
+    {
+      "id": "uc5-identity",
+      "title": "Identity in content",
+      "file": "uc5-identity.json"
+    },
+    {
+      "id": "uc6-fail-closed",
+      "title": "Fail closed",
+      "file": "uc6-fail-closed.json"
+    }
+  ]
+}

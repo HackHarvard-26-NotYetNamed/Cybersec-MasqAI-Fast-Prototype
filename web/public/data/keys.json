@@ -1,0 +1,17 @@
+{
+  "_comment": "PLACEHOLDER — simulated Key Enigma log. Times are seconds from the start of the demo. Replace with the real Key Enigma log export.",
+  "placeholder": true,
+  "provider": "OpenRouter",
+  "keys": [
+    { "label": "enigma-001", "createdAt": 0,    "activeUntil": 300,  "revokedAt": 330 },
+    { "label": "enigma-002", "createdAt": 290,  "activeUntil": 410,  "revokedAt": 412 },
+    { "label": "enigma-003", "createdAt": 410,  "activeUntil": 710,  "revokedAt": 740 },
+    { "label": "enigma-004", "createdAt": 700,  "activeUntil": 1010, "revokedAt": 1040 },
+    { "label": "enigma-005", "createdAt": 1000, "activeUntil": 1310, "revokedAt": 1340 },
+    { "label": "enigma-006", "createdAt": 1300, "activeUntil": 1610, "revokedAt": 1640 }
+  ],
+  "honeytokens": [
+    { "label": "canary-7", "plantedAt": 120, "usedAt": 410,  "usedBy": "relay (playground)", "verdict": "untrustworthy" },
+    { "label": "canary-8", "plantedAt": 900, "usedAt": null, "usedBy": null, "verdict": "not triggered" }
+  ]
+}

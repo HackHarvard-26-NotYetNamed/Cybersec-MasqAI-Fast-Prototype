@@ -1,0 +1,151 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-geist-sans);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+
+  /* Meaningful colors. Always paired with an icon or a label in the UI. */
+  --color-leak: var(--leak);
+  --color-restored: var(--restored);
+  --color-collapsed: var(--collapsed);
+  --color-ent-path: var(--ent-path);
+  --color-ent-key: var(--ent-key);
+  --color-ent-email: var(--ent-email);
+  --color-ent-host: var(--ent-host);
+  --color-ent-user: var(--ent-user);
+  --color-ent-other: var(--ent-other);
+  --color-series-raw: var(--series-raw);
+  --color-series-masq: var(--series-masq);
+}
+
+:root {
+  --radius: 0.375rem;
+  --background: #f4f4f1;
+  --foreground: #111316;
+  --card: #fbfbfa;
+  --card-foreground: #111316;
+  --popover: #fbfbfa;
+  --popover-foreground: #111316;
+  --primary: #111316;
+  --primary-foreground: #fbfbfa;
+  --secondary: #e7e7e3;
+  --secondary-foreground: #111316;
+  --muted: #e9e9e5;
+  --muted-foreground: #4f555c;
+  --accent: #e2e2de;
+  --accent-foreground: #111316;
+  --destructive: #c42b2b;
+  --border: #d6d7d2;
+  --input: #cfd0cb;
+  --ring: #2a78d6;
+
+  --leak: #c42b2b;
+  --restored: #157a3a;
+  --collapsed: #5f6670;
+  --ent-path: #1d4ed8;
+  --ent-key: #93580a;
+  --ent-email: #7e22ce;
+  --ent-host: #0e6b82;
+  --ent-user: #be185d;
+  --ent-other: #525252;
+  --series-raw: #eb6834;
+  --series-masq: #2a78d6;
+}
+
+.dark {
+  --background: #0b0d10;
+  --foreground: #e8eaed;
+  --card: #12151a;
+  --card-foreground: #e8eaed;
+  --popover: #181c22;
+  --popover-foreground: #e8eaed;
+  --primary: #e8eaed;
+  --primary-foreground: #0b0d10;
+  --secondary: #1c2027;
+  --secondary-foreground: #e8eaed;
+  --muted: #1a1e24;
+  --muted-foreground: #a2abb5;
+  --accent: #222831;
+  --accent-foreground: #e8eaed;
+  --destructive: #ff6b6b;
+  --border: #262c35;
+  --input: #2d343e;
+  --ring: #3987e5;
+
+  --leak: #ff6b6b;
+  --restored: #4ade80;
+  --collapsed: #98a1ab;
+  --ent-path: #6aa8ff;
+  --ent-key: #fbbf24;
+  --ent-email: #c99bff;
+  --ent-host: #2fd4ee;
+  --ent-user: #f77fbf;
+  --ent-other: #b0b0b0;
+  --series-raw: #d95926;
+  --series-masq: #3987e5;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+/* A faint instrument grid behind hero areas. */
+.bg-grid {
+  background-image:
+    linear-gradient(to right, color-mix(in oklab, var(--foreground) 6%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklab, var(--foreground) 6%, transparent) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

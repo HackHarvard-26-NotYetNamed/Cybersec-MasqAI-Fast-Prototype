@@ -1,0 +1,530 @@
+"use client";
+
+import { useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react";
+import { motion, useReducedMotion } from "motion/react";
+import {
+  Ban,
+  ChevronLeft,
+  ChevronRight,
+  Laptop,
+  Lock,
+  Pause,
+  Play,
+  RadioTower,
+  RotateCcw,
+  ShieldCheck,
+  ShieldOff,
+  TriangleAlert,
+} from "lucide-react";
+import { ReplayIndexSchema, ReplaySchema, useJson, type Replay, type Step } from "@/lib/data";
+import { CHIP_STYLES, indexReplay, relayCounts, type ChipType, type ReplayIndex } from "@/lib/entities";
+import { cn } from "@/lib/utils";
+import { DataError, Loading } from "@/components/site/page-bits";
+import { PlaceholderChip, RestoredMark, SecretMark } from "./annotated-text";
+import { StepView, type PaneMode } from "./step-view";
+
+const ucLabel = (id: string) => id.match(/^uc(\d+)/i)?.[0].toUpperCase() ?? id;
+
+export function ReplayTheater() {
+  const index = useJson("/data/replays/index.json", ReplayIndexSchema);
+  const [picked, setPicked] = useState(() => (typeof window === "undefined" ? "" : window.location.hash.slice(1)));
+
+  if (index.status === "loading") return <Loading label="Loading replays" />;
+  if (index.status === "error") return <DataError url={index.url} message={index.message} />;
+
+  const replays = index.data.replays;
+  const current = replays.find((r) => r.id === picked) ?? replays[0];
+  const pick = (id: string) => {
+    setPicked(id);
+    history.replaceState(null, "", `#${id}`);
+  };
+
+  return (
+    <div className="space-y-5">
+      <div role="group" aria-label="Use case" className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        {replays.map((r) => {
+          const active = r.id === current.id;
+          return (
+            <button
+              key={r.id}
+              type="button"
+              aria-pressed={active}
+              onClick={() => pick(r.id)}
+              className={cn(
+                "rounded-md border px-3 py-2 text-left transition-colors hover:bg-accent",
+                active ? "border-foreground/50 bg-accent" : "bg-card",
+              )}
+            >
+              <span className="block font-mono text-sm text-muted-foreground">{ucLabel(r.id)}</span>
+              <span className="block text-sm font-medium leading-snug">{r.title}</span>
+            </button>
+          );
+        })}
+      </div>
+      <ReplayLoader key={current.id} file={`/data/replays/${current.file}`} />
+    </div>
+  );
+}
+
+function ReplayLoader({ file }: { file: string }) {
+  const replay = useJson(file, ReplaySchema);
+  if (replay.status === "loading") return <Loading label="Loading replay" />;
+  if (replay.status === "error") return <DataError url={replay.url} message={replay.message} />;
+  return <Player replay={replay.data} />;
+}
+
+function stepDelay(step: Step) {
+  return 2000 + Math.min(2200, (step.raw.length + (step.toolCall?.argsSent.length ?? 0)) * 3);
+}
+
+function caption(step: Step, unprotected: boolean): string {
+  if (step.note) return step.note;
+  if (step.blocked) return "Blocked: the security model is unavailable, so nothing is forwarded.";
+  const secrets = step.entities.filter((e) => e.op !== "collapse");
+  const collapsed = step.entities.filter((e) => e.op === "collapse").length;
+  if (unprotected) {
+    if (step.role === "assistant")
+      return step.toolCall ? "The model saw the real values, so its tool call contains them too." : "Model response.";
+    return secrets.length
+      ? `Without MasqAI the relay receives all ${secrets.length} sensitive value${secrets.length > 1 ? "s" : ""} verbatim.`
+      : "Without MasqAI this is forwarded verbatim. Nothing sensitive in this one.";
+  }
+  if (step.role === "assistant") {
+    const call = step.toolCall;
+    if (call && call.argsSent !== call.argsRestored)
+      return "The model's tool call contains placeholders. MasqAI swaps the real values back in locally, so the command runs on real data.";
+    if (call) return "A tool call with nothing to restore: it runs exactly as the model wrote it.";
+    return "Model response. Chat text is not restored, so the agent sees placeholders too: proof the model never had the values.";
+  }
+  if (!secrets.length && !collapsed) return "Nothing sensitive here: forwarded unchanged.";
+  const missed = secrets.filter((e) => e.missed).length;
+  const parts = [];
+  if (secrets.length) parts.push(`masks ${secrets.length - missed} of ${secrets.length} sensitive values`);
+  if (collapsed) parts.push(`collapses ${collapsed} noisy block${collapsed > 1 ? "s" : ""}`);
+  return `MasqAI ${parts.join(" and ")}.${missed ? ` ${missed} slipped through (marked as leaked).` : ""}`;
+}
+
+function Player({ replay }: { replay: Replay }) {
+  const index = useMemo(() => indexReplay(replay), [replay]);
+  const last = replay.steps.length - 1;
+  const [i, setI] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [unprotected, setUnprotected] = useState(false);
+  const [mobilePane, setMobilePane] = useState<"agent" | "relay">("relay");
+
+  useEffect(() => {
+    if (!playing) return;
+    const id = setTimeout(() => {
+      const next = Math.min(i + 1, last);
+      setI(next);
+      if (next >= last) setPlaying(false);
+    }, stepDelay(replay.steps[i]));
+    return () => clearTimeout(id);
+  }, [playing, i, last, replay]);
+
+  const go = (n: number) => {
+    setPlaying(false);
+    setI(Math.max(0, Math.min(last, n)));
+  };
+  const togglePlay = () => {
+    if (playing) return setPlaying(false);
+    if (i >= last) setI(0);
+    setPlaying(true);
+  };
+
+  // ←/→ step, space plays/pauses. Ignored while typing or when a control handles the key itself.
+  const onKey = useEffectEvent((e: KeyboardEvent) => {
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    const target = e.target as HTMLElement | null;
+    if (target?.closest("input, textarea, select, [contenteditable=true], [role=tab]")) return;
+    if (e.key === "ArrowRight") go(i + 1);
+    else if (e.key === "ArrowLeft") go(i - 1);
+    else if (e.key === " " && !target?.closest("button, a, [role=switch]")) togglePlay();
+    else return;
+    e.preventDefault();
+  });
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => onKey(e);
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  const step = replay.steps[i];
+  const visible = replay.steps.slice(0, i + 1);
+  const counts = relayCounts(replay, i, !unprotected);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-4 rounded-lg border bg-card p-4 lg:flex-row lg:items-start">
+        <div className="flex-1">
+          <h2 className="text-xl font-semibold">
+            <span className="mr-2 font-mono text-muted-foreground">{ucLabel(replay.id)}</span>
+            {replay.title}
+          </h2>
+          <p className="mt-1 text-pretty text-muted-foreground">{replay.summary}</p>
+        </div>
+        <UnprotectedSwitch on={unprotected} onChange={setUnprotected} />
+      </div>
+
+      <div className="rounded-lg border bg-card p-3 sm:p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <ControlButton label={playing ? "Pause (space)" : "Play (space)"} onClick={togglePlay} primary>
+            {playing ? <Pause aria-hidden className="size-4" /> : <Play aria-hidden className="size-4" />}
+            <span>{playing ? "Pause" : i >= last ? "Replay" : "Play"}</span>
+          </ControlButton>
+          <ControlButton label="Previous step (left arrow)" onClick={() => go(i - 1)} disabled={i === 0}>
+            <ChevronLeft aria-hidden className="size-4" />
+          </ControlButton>
+          <ControlButton label="Next step (right arrow)" onClick={() => go(i + 1)} disabled={i === last}>
+            <ChevronRight aria-hidden className="size-4" />
+          </ControlButton>
+          <ControlButton label="Restart" onClick={() => go(0)} disabled={i === 0}>
+            <RotateCcw aria-hidden className="size-4" />
+          </ControlButton>
+          <span className="font-mono text-sm text-muted-foreground tabular-nums">
+            Step {i + 1} / {replay.steps.length}
+          </span>
+          <span className="ml-auto hidden text-sm text-muted-foreground md:inline">
+            Keys: <kbd className="rounded border px-1 font-mono">←</kbd> <kbd className="rounded border px-1 font-mono">→</kbd>{" "}
+            <kbd className="rounded border px-1 font-mono">space</kbd>
+          </span>
+        </div>
+        <Timeline steps={replay.steps} current={i} onPick={go} />
+        <p aria-live="polite" className="mt-3 min-h-[1.5em] text-base text-pretty">
+          {caption(step, unprotected)}
+        </p>
+      </div>
+
+      <div role="tablist" aria-label="Pane" className="grid grid-cols-2 gap-1 rounded-lg border bg-muted p-1 md:hidden">
+        {(["agent", "relay"] as const).map((p) => (
+          <button
+            key={p}
+            role="tab"
+            id={`tab-${p}`}
+            aria-selected={mobilePane === p}
+            aria-controls={`pane-${p}`}
+            onClick={() => setMobilePane(p)}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowLeft" || e.key === "ArrowRight") setMobilePane(p === "agent" ? "relay" : "agent");
+            }}
+            className={cn(
+              "min-h-10 rounded-md text-sm font-medium",
+              mobilePane === p ? "bg-card text-foreground shadow-sm" : "text-muted-foreground",
+            )}
+          >
+            {p === "agent" ? "Agent" : "Relay"}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Pane
+          id="agent"
+          hiddenOnMobile={mobilePane !== "agent"}
+          icon={<Laptop aria-hidden className="size-4" />}
+          title="What your agent sent"
+          subtitle="Raw, on your machine"
+          scrollKey={i}
+          status={
+            <p className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-sm text-muted-foreground">
+              <Lock aria-hidden className="size-4" />
+              Real values stay in gateway RAM on this machine
+            </p>
+          }
+        >
+          {visible.map((s, n) => (
+            <AnimatedStep key={n}>
+              <StepView step={s} mode="agent" index={index} current={n === i} />
+            </AnimatedStep>
+          ))}
+        </Pane>
+        <Pane
+          id="relay"
+          hiddenOnMobile={mobilePane !== "relay"}
+          icon={<RadioTower aria-hidden className="size-4" />}
+          title="What the relay saw"
+          subtitle={unprotected ? "Without MasqAI" : "Sanitized by MasqAI"}
+          scrollKey={i}
+          tone={unprotected ? "leak" : undefined}
+          status={<Counter requests={counts.requests} exposed={counts.exposed} />}
+        >
+          <RelaySteps visible={visible} current={i} index={index} unprotected={unprotected} />
+        </Pane>
+      </div>
+
+      <Legend />
+    </div>
+  );
+}
+
+function RelaySteps({
+  visible,
+  current,
+  index,
+  unprotected,
+}: {
+  visible: Step[];
+  current: number;
+  index: ReplayIndex;
+  unprotected: boolean;
+}) {
+  const mode: PaneMode = unprotected ? "unprotected" : "relay";
+  const shown = visible.map((s, n) => ({ s, n })).filter(({ s }) => unprotected || !s.blocked);
+  const blockedNow = !unprotected && visible[current]?.blocked;
+  return (
+    <>
+      {shown.map(({ s, n }) => (
+        <AnimatedStep key={n}>
+          <StepView step={s} mode={mode} index={index} current={n === current} />
+        </AnimatedStep>
+      ))}
+      {blockedNow ? (
+        shown.length === 0 ? (
+          <AnimatedStep>
+            <div className="flex min-h-72 flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed border-leak/60 bg-leak/6 p-6 text-center">
+              <Ban aria-hidden className="size-12 text-leak" />
+              <p className="font-mono text-2xl font-bold tracking-tight text-leak">BLOCKED</p>
+              <p className="text-lg font-medium">0 requests reached the relay</p>
+              <p className="max-w-sm text-muted-foreground">
+                The security model is down, so MasqAI fails closed: HTTP 502 to the agent, nothing upstream.
+              </p>
+            </div>
+          </AnimatedStep>
+        ) : (
+          <p className="flex items-center gap-2 rounded-lg border border-dashed border-leak/60 p-3 font-medium text-leak">
+            <Ban aria-hidden className="size-4" /> Blocked: this request never reached the relay.
+          </p>
+        )
+      ) : null}
+    </>
+  );
+}
+
+function AnimatedStep({ children }: { children: ReactNode }) {
+  const reduce = useReducedMotion();
+  return (
+    <motion.div
+      initial={reduce ? false : { opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, ease: "easeOut" }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+function Pane({
+  id,
+  title,
+  subtitle,
+  icon,
+  status,
+  children,
+  scrollKey,
+  hiddenOnMobile,
+  tone,
+}: {
+  id: string;
+  title: string;
+  subtitle: string;
+  icon: ReactNode;
+  status: ReactNode;
+  children: ReactNode;
+  scrollKey: number;
+  hiddenOnMobile: boolean;
+  tone?: "leak";
+}) {
+  const scroller = useRef<HTMLDivElement>(null);
+  // Keep the newest step in view inside the pane, without scrolling the page.
+  useEffect(() => {
+    const el = scroller.current;
+    const target = el?.querySelector<HTMLElement>("[aria-current=step]") ?? (el?.lastElementChild as HTMLElement | null);
+    if (!el || !target) return;
+    // Measured from rects: offsetTop is relative to the animating (transformed) wrapper mid-entrance.
+    const box = target.getBoundingClientRect();
+    const offset = box.top - el.getBoundingClientRect().top + el.scrollTop;
+    const top = box.height > el.clientHeight ? offset - 12 : offset + box.height - el.clientHeight + 12;
+    el.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+  }, [scrollKey]);
+
+  return (
+    <section
+      id={`pane-${id}`}
+      role="tabpanel"
+      aria-labelledby={`pane-${id}-title`}
+      className={cn(
+        "flex-col overflow-hidden rounded-lg border bg-muted/40 md:flex",
+        hiddenOnMobile ? "hidden" : "flex",
+        tone === "leak" && "border-leak/60",
+      )}
+    >
+      <header className="space-y-2 border-b bg-card px-4 py-3">
+        <div className="flex flex-wrap items-baseline gap-x-3">
+          <h3 id={`pane-${id}-title`} className="flex items-center gap-2 font-semibold">
+            {icon}
+            {title}
+          </h3>
+          <p className={cn("text-sm text-muted-foreground", tone === "leak" && "font-medium text-leak")}>{subtitle}</p>
+        </div>
+        {status}
+      </header>
+      <div
+        ref={scroller}
+        tabIndex={0}
+        aria-label={`${title}: transcript`}
+        className="relative h-[min(64vh,680px)] min-h-[360px] space-y-3 overflow-y-auto p-3 sm:p-4"
+      >
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function Counter({ requests, exposed }: { requests: number; exposed: number }) {
+  const bad = exposed > 0;
+  const Icon = bad ? TriangleAlert : ShieldCheck;
+  return (
+    <p
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 font-mono text-sm tabular-nums",
+        bad ? "border-leak/50 bg-leak/10 text-leak" : "border-restored/50 bg-restored/10 text-restored",
+      )}
+    >
+      <Icon aria-hidden className="size-4" />
+      Relay received {requests} request{requests === 1 ? "" : "s"} · {exposed} secret{exposed === 1 ? "" : "s"} exposed
+    </p>
+  );
+}
+
+function UnprotectedSwitch({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      onClick={() => onChange(!on)}
+      className={cn(
+        "inline-flex shrink-0 items-center gap-3 self-start rounded-lg border px-3 py-2 text-left transition-colors",
+        on ? "border-leak/60 bg-leak/10" : "bg-background hover:bg-accent",
+      )}
+    >
+      <span
+        aria-hidden
+        className={cn(
+          "relative h-6 w-11 rounded-full border transition-colors",
+          on ? "border-leak bg-leak/80" : "border-input bg-muted",
+        )}
+      >
+        <span
+          className={cn(
+            "absolute top-0.5 size-[18px] rounded-full bg-background shadow transition-[left]",
+            on ? "left-[22px]" : "left-0.5",
+          )}
+        />
+      </span>
+      <span>
+        <span className="flex items-center gap-1.5 font-medium">
+          {on ? <ShieldOff aria-hidden className="size-4 text-leak" /> : <ShieldCheck aria-hidden className="size-4" />}
+          Without MasqAI
+        </span>
+        <span className="block text-sm text-muted-foreground">{on ? "Showing the unprotected baseline" : "Show the before"}</span>
+      </span>
+    </button>
+  );
+}
+
+function ControlButton({
+  label,
+  onClick,
+  disabled,
+  primary,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  primary?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        "inline-flex min-h-10 min-w-10 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium transition-colors disabled:opacity-40",
+        primary ? "border-transparent bg-primary text-primary-foreground hover:bg-primary/85" : "hover:bg-accent",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Timeline({ steps, current, onPick }: { steps: Step[]; current: number; onPick: (n: number) => void }) {
+  return (
+    <ol aria-label="Steps" className="mt-3 flex gap-1">
+      {steps.map((s, n) => {
+        const label = `Step ${n + 1}: ${s.role === "user" ? "prompt" : s.role === "tool" ? "tool output" : "model response"}${s.blocked ? ", blocked" : ""}`;
+        return (
+          <li key={n} className="flex-1">
+            <button
+              type="button"
+              aria-label={label}
+              title={label}
+              aria-current={n === current ? "step" : undefined}
+              onClick={() => onPick(n)}
+              className="group flex h-8 w-full items-center"
+            >
+              <span
+                className={cn(
+                  "h-2 w-full rounded-full transition-colors",
+                  s.blocked
+                    ? "bg-leak/70"
+                    : n <= current
+                      ? s.role === "assistant"
+                        ? "bg-foreground/45"
+                        : "bg-foreground"
+                      : "bg-foreground/15 group-hover:bg-foreground/30",
+                  n === current && "h-3 ring-2 ring-ring ring-offset-2 ring-offset-card",
+                )}
+              />
+            </button>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function Legend() {
+  const types: ChipType[] = ["PATH", "KEY", "EMAIL", "HOST", "USER"];
+  return (
+    <div className="rounded-lg border bg-card p-4">
+      <h3 className="mb-2 text-sm font-medium text-muted-foreground">Legend</h3>
+      <ul className="flex flex-wrap items-center gap-x-5 gap-y-2 font-mono text-[15px]">
+        <li className="flex items-center gap-2">
+          <SecretMark text="real value" type="KEY" />
+        </li>
+        <li className="flex items-center gap-2">
+          <SecretMark text="leaked" type="KEY" leaked />
+        </li>
+        {types.map((t) => (
+          <li key={t}>
+            <PlaceholderChip placeholder={`<${t}_…>`} type={t} />
+            <span className="ml-1.5 font-sans text-sm text-muted-foreground">{CHIP_STYLES[t].label} masked</span>
+          </li>
+        ))}
+        <li className="flex items-center gap-1.5 font-sans text-sm text-collapsed">
+          <span aria-hidden className="inline-block h-4 w-6 rounded border border-dashed border-collapsed/60 bg-collapsed/15" />
+          Collapsed (lossy summary)
+        </li>
+        <li className="flex items-center gap-2">
+          <RestoredMark text="restored locally" />
+        </li>
+      </ul>
+    </div>
+  );
+}
