@@ -137,9 +137,6 @@ def auto_spans(session: Session, item_id: str, text: str) -> tuple[list[Span], l
             if enc != value:
                 forms.add(enc)
 
-        # Ambient identifiers (username, host) should also treat hyphens and dots as word constituents
-        # when flanked by other alphanumerics, avoiding auto-masking inside structured tokens like sk-alice-token.
-        is_ambient = entity.entity_type in ("USERNAME", "HOST", "USER")
         for form in forms:
             position = text.find(form)
             while position != -1:
@@ -147,10 +144,9 @@ def auto_spans(session: Session, item_id: str, text: str) -> tuple[list[Span], l
                 prev_ch = text[position - 1] if position > 0 else ""
                 next_ch = text[end] if end < len(text) else ""
                 
-                # For ambient identifiers, a dot only counts as a word continuation if it is
-                # part of a compound identifier (flanked by alphanumerics), not trailing punctuation.
-                inside_left = _word(prev_ch) or (is_ambient and prev_ch == "." and position > 1 and _word(text[position - 2]))
-                inside_right = _word(next_ch) or (is_ambient and next_ch == "." and end + 1 < len(text) and _word(text[end + 1]))
+                # Dots delimit host labels, email components and filename extensions.
+                inside_left = _word(prev_ch)
+                inside_right = _word(next_ch)
                 inside = (_word(form[0]) and inside_left) or (_word(form[-1]) and inside_right)
                 if inside:
                     skipped.append({"start": position, "end": end, "token": entity.token, "reason": "inside a word"})

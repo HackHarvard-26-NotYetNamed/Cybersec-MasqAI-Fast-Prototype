@@ -21,13 +21,13 @@ from .model import ContextItem, Entity, Session
 PACKAGE_RULES = Path(__file__).parent / "rules"
 MIN_VALUE_LENGTH = 3
 PLACEHOLDER_RE = re.compile(r"<\$?[A-Z][A-Z0-9_]*_[a-f0-9]{8}>")
-TEMPLATE_STARTS = ("$", "%", "{{", "*", "<", "#")
+TEMPLATE_STARTS = ("{{", "<")
 
 
 def templated(value: str) -> bool:
     """A reference, template or elided example rather than a literal (`${DB_PASSWORD}`, `$TOKEN`,
     `<PATH_…>`, `{{x}}`, `__TOKEN__`, `sk-...`, `<your key here>`)."""
-    return (bool(PLACEHOLDER_RE.search(value)) or "${" in value or value.startswith(TEMPLATE_STARTS)
+    return (bool(PLACEHOLDER_RE.search(value)) or bool(re.fullmatch(r"\$[A-Za-z_][A-Za-z0-9_]*|\$\{[^{}]+\}|%[A-Za-z_][A-Za-z0-9_]*%|\*+", value)) or value.startswith(TEMPLATE_STARTS)
             or (value.startswith("__") and value.endswith("__")) or "..." in value or "…" in value
             or ("<" in value and ">" in value) or value.lower().startswith(("your", "my-", "my_", "example")))
 
@@ -101,7 +101,7 @@ def keyvalue_rule(names: list[str], min_length: int, min_mixed: int, ignore_valu
     # behind a `[…]*` prefix would be retried at every position of every word.
     pattern = re.compile(
         r"(?<![A-Za-z0-9_.-])(?P<key>[A-Za-z0-9_.-]+)\\?[\"']?[ \t]*(?:=|:(?!:))(?![=~])[ \t]*"
-        r"(?:(?P<q>\\?[\"'])(?P<value>[^\"'\\\r\n]+)(?P=q)|(?P<bare>[^\s\"'`,;{}()\[\]<>&|\\]+))")
+        r"(?:(?P<q>\\?[\"'])(?P<value>[^\"'\\\r\n]+)(?P=q)|(?P<bare>[^\s\"'`,;{}()\[\]<>|\\]+))")
     ignore = {v.lower() for v in ignore_values} | {n.lower() for n in names}
     identifier = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
     attribute = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+")

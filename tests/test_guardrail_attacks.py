@@ -117,7 +117,6 @@ class GuardrailAttacks(unittest.TestCase):
                 self.assertNotIn(KEY, r.text)
 
 
-    @unittest.expectedFailure
     def test_exfiltration_past_any_word_list_is_inspected(self):
         """Adding words to the network list can't keep up: these skip inspection after 31d9eb2. The structural
         fix is an allowlist: skip inspection only for clearly local commands, inspect everything else."""
