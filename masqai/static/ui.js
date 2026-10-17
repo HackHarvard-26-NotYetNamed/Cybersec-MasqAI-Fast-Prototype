@@ -1,5 +1,24 @@
-// Shared DOM helpers for the Context and Security pages (config.js keeps its own copy).
+// Shared DOM helpers for the pages (config.js keeps its own copy of h()), plus the admin-token API helper.
 const UI = (() => {
+  // The admin token arrives once in the URL fragment (#token=…), printed by the gateway at startup.
+  // It moves to sessionStorage and leaves the URL, so it isn't kept in history or shared screenshots.
+  const TOKEN_KEY = "masqai-admin-token";
+  (() => {
+    const match = location.hash.match(/(?:^#|&)token=([^&]+)/);
+    if (match) {
+      sessionStorage.setItem(TOKEN_KEY, decodeURIComponent(match[1]));
+      history.replaceState(null, "", location.pathname + location.search);
+    }
+  })();
+  const token = () => sessionStorage.getItem(TOKEN_KEY) || "";
+
+  // Every control-API call carries x-masqai-token. A 401 means the token is missing or from an earlier start.
+  async function api(path, options = {}) {
+    const response = await fetch(path, { ...options, headers: { ...(options.headers || {}), "x-masqai-token": token() } });
+    if (response.status === 401) document.dispatchEvent(new CustomEvent("masqai-unauthorized"));
+    return response;
+  }
+
   function h(tag, props, ...children) {
     const el = document.createElement(tag);
     for (const [key, value] of Object.entries(props || {})) {
@@ -49,8 +68,8 @@ const UI = (() => {
     return [left, right];
   }
 
-  // Inline marks: placeholders (<TYPE_id>, <$TYPE_id>), collapse markers, and known raw values.
-  const TOKEN = /<\$?[A-Z][A-Z0-9_]*_[a-f0-9]{8}>|…\[MASQ_BLOCK: [^\]\n]*\]…/g;
+  // Inline marks: placeholders (<TYPE_id>, <$TYPE_id>), hidden-intel markers, and known raw values.
+  const TOKEN = /<\$?[A-Z][A-Z0-9_]*_[a-f0-9]{8}>|…\[hidden: [^\]\n]*\]…/g;
   const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
   // entities: [{token, type, canonical, aliases}]. Returns a marker for one side.
@@ -75,8 +94,8 @@ const UI = (() => {
         if (side === "raw") {
           const e = values.get(s);
           out.push(h("mark", { class: "secret", title: `${e.type} → ${e.token}${s === e.canonical ? "" : " (alias)"}` }, s));
-        } else if (s.startsWith("…[MASQ_BLOCK")) {
-          out.push(h("mark", { class: "block", title: "Collapsed by the security model (Rephrase). The original lines stay in RAM." }, s));
+        } else if (s.startsWith("…[hidden")) {
+          out.push(h("mark", { class: "block", title: "Intel hidden by the security model (lossy). The original lines stay in RAM." }, s));
         } else {
           const e = byToken.get(s.replace("<$", "<"));
           out.push(h("mark", { class: "ph" + (s.startsWith("<$") ? " alias" : ""), title: e ? `${e.type}: ${e.canonical}${s.startsWith("<$") ? " (alias form)" : ""}` : "unknown placeholder" }, s));
@@ -153,10 +172,12 @@ const UI = (() => {
   // Raw-side marks from exact spans. spans: [{start, end, placeholder, origin}] masked here;
   // unmasked: [{start, end, token, reason}] known values deliberately left as-is. Returns a function
   // that marks one line given its character offset in the item text.
-  function spanMarker(spans, unmasked, collapses) {
+  function spanMarker(spans, unmasked, replaces = []) {
     const marks = [
-      ...spans.map((s) => ({ ...s, cls: "secret", title: `sent as ${s.placeholder} · ${s.origin === "model" ? "masked by the security model" : "automatic copy of a known value"}` })),
+      ...spans.map((s) => ({ ...s, cls: "secret" + (s.origin === "model" ? " model" : ""),
+        title: `sent as ${s.placeholder} · ${s.origin === "model" ? "found by the security model" : "detector or automatic copy of a known value"}` })),
       ...unmasked.map((u) => ({ ...u, cls: "kept", title: `matches ${u.token} but left as-is: ${u.reason}` })),
+      ...replaces.map((r) => ({ ...r, cls: "intel", title: `intel replaced with “${r.with}”${r.reason ? ": " + r.reason : ""}` })),
     ].sort((a, b) => a.start - b.start);
     return (line, offset) => {
       const end = offset + line.length;
@@ -175,5 +196,24 @@ const UI = (() => {
     };
   }
 
-  return { h, text, short, plural, ago, ms, diff, align, marker, spanMarker, lines, pill, fold, throttle };
+  // Sent-side marks for one item: the session marker, plus each replace's neutral substitute.
+  function outMarker(base, replaces = []) {
+    const subs = [...new Set(replaces.map((r) => r.with))].filter(Boolean).sort((a, b) => b.length - a.length);
+    if (!subs.length) return base;
+    const pattern = new RegExp(subs.map(escape).join("|"), "g");
+    return (line) => base(line).flatMap((part) => {
+      if (typeof part !== "string") return [part];
+      const out = [];
+      let last = 0;
+      for (const m of part.matchAll(pattern)) {
+        if (m.index > last) out.push(part.slice(last, m.index));
+        out.push(h("mark", { class: "intel", title: "Intel replaced by the security model (lossy, never restored)" }, m[0]));
+        last = m.index + m[0].length;
+      }
+      if (last < part.length) out.push(part.slice(last));
+      return out;
+    });
+  }
+
+  return { h, text, short, plural, ago, ms, diff, align, marker, spanMarker, outMarker, lines, pill, fold, throttle, api, token };
 })();

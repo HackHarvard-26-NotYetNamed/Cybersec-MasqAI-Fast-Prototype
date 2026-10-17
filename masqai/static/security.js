@@ -18,7 +18,7 @@ const SecurityPage = (() => {
     blocked: ["blocked", "bad"], error: ["error", "bad"],
   };
   const KIND = { message: "message", tool_result: "tool result", tool_arguments: "tool call args", system: "system", tool_definition: "tool description", reasoning: "reasoning" };
-  const OP_CLS = { mask: "ok", collapse: "warn", relink: "info", unmask: "bad" };
+  const OP_CLS = { mask: "ok", hide: "warn", replace: "warn", relink: "info", unmask: "bad" };
 
   const traces = () => App.state.traces || [];
   const visible = () => traces().filter((t) =>
@@ -38,7 +38,7 @@ const SecurityPage = (() => {
     const count = (op) => ops.filter((r) => r.op?.op === op).length;
     const parts = [];
     if (t.applied?.new_entities?.length) parts.push(`${t.applied.new_entities.length} new ${t.applied.new_entities.length === 1 ? "value" : "values"}`);
-    for (const op of ["mask", "collapse", "relink", "unmask"]) if (count(op)) parts.push(`${count(op)} ${op}`);
+    for (const op of ["mask", "hide", "replace", "relink", "unmask"]) if (count(op)) parts.push(`${count(op)} ${op}`);
     if (t.validation?.corrected) parts.push("corrected once");
     return parts.length ? parts.join(" · ") : "no change needed";
   }
@@ -124,7 +124,7 @@ const SecurityPage = (() => {
 
   // "#3" refs in the model's input map to item ids through the session's current items.
   function itemId(t, ref) {
-    const session = App.state.sessions.find((s) => s.id === t.session_id);
+    const session = App.detail(t.session_id);
     const n = Number(String(ref).replace("#", ""));
     return session && n ? session.items[n - 1]?.id : null;
   }
@@ -163,12 +163,16 @@ const SecurityPage = (() => {
       [jump(t, item.item), pill(item.role, "dim"), h("span", null, KIND[item.kind] || item.kind), h("span", { class: "muted" }, `${item.lines.length} lines`),
         item.masked ? pill(`${item.masked.length} already masked`, "info") : null,
         item.known_values_left_as_is ? pill(`${item.known_values_left_as_is.length} left as-is`, "dim") : null,
-        item.collapsed ? pill(`${item.collapsed.length} collapsed`, "warn") : null],
+        item.auto_masks_applied ? pill(`${item.auto_masks_applied.length} auto (vetoable)`, "dim") : null,
+        item.hidden ? pill(`${item.hidden.length} hidden`, "warn") : null,
+        item.replaced ? pill(`${item.replaced.length} replaced`, "warn") : null,
+        item.allowed ? pill(item.allowed, "dim", "Hide and replace only apply to tool results") : null],
       h("div", { class: "inner" }, numberedLines(item.lines, item.masked, item.known_values_left_as_is)))));
     const existing = input.existing_operations.map((op, i) => h("div", { class: "op" },
       h("div", { class: "what" }, pill(op.op, OP_CLS[op.op]), " ", jump(t, op.item), " ",
         op.op === "mask" ? [`line ${op.line} `, h("code", null, op.text), " → ", h("mark", { class: "ph" + (op.placeholder.startsWith("<$") ? " alias" : "") }, op.placeholder)]
-          : [`lines ${op.start}–${op.end} → `, h("mark", { class: "block" }, `…[MASQ_BLOCK: ${op.summary}]…`)]),
+          : op.op === "replace" ? [`line ${op.line} `, h("code", null, op.text), " → ", h("mark", { class: "intel" }, op.with)]
+            : [`lines ${op.start}–${op.end} → `, h("mark", { class: "block" }, `…[hidden: ${op.summary}]…`)]),
       numberedLines(op.context, op.op === "mask" ? [{ ...op, by: "earlier operation" }] : [])));
     const mapping = input.mapping.length
       ? h("table", null, h("thead", null, h("tr", null, h("th", null, "Placeholder"), h("th", null, "Value"), h("th", null, "Origin"))),
@@ -206,8 +210,10 @@ const SecurityPage = (() => {
       case "mask":
         return [where, " ", h("code", null, op.text ?? "?"), op.nth > 1 ? ` (#${op.nth})` : "", " → ",
           op.token ? [op.alias ? "partial form of " : "", h("code", null, op.token)] : ["new ", h("b", null, op.type || "SECRET"), op.label ? ` "${op.label}"` : ""]];
-      case "collapse":
-        return [where, ` lines ${op.start}–${op.end} → `, h("mark", { class: "block" }, `…[MASQ_BLOCK: ${op.summary ?? ""}]…`)];
+      case "hide":
+        return [where, ` lines ${op.start}–${op.end} → `, h("mark", { class: "block" }, `…[hidden: ${op.summary ?? ""}]…`), op.class ? ` (${op.class})` : ""];
+      case "replace":
+        return [where, " ", h("code", null, op.text ?? "?"), op.nth > 1 ? ` (#${op.nth})` : "", " → ", h("mark", { class: "intel" }, op.with ?? "?"), op.class ? ` (${op.class})` : ""];
       case "relink":
         return [h("code", null, op.token), " becomes a partial form of ", h("code", null, op.to)];
       case "unmask":
@@ -235,7 +241,7 @@ const SecurityPage = (() => {
         a.http_status >= 400 ? pill(`HTTP ${a.http_status}`, "bad") : !a.parsed ? pill("not valid JSON", "bad") : rejected ? pill(`${rejected} rejected`, "bad") : pill("all accepted", "ok"),
         h("span", { class: "sub" }, [ms(a.duration_ms), a.usage ? `${a.usage.prompt_tokens ?? a.usage.input_tokens ?? "?"} in / ${a.usage.completion_tokens ?? a.usage.output_tokens ?? "?"} out tokens` : ""].filter(Boolean).join(" · "))),
       a.correction ? keep(`${t.id}:corr${a.attempt}`, fold([h("b", null, "Errors sent back"), h("span", { class: "muted" }, "only the rejected operations")], h("pre", null, a.correction))) : null,
-      a.parsed ? (rows.length ? h("div", null, rows) : h("div", { class: "body muted" }, "No operations: the model found nothing new to mask or collapse.")) : null,
+      a.parsed ? (rows.length ? h("div", null, rows) : h("div", { class: "body muted" }, "No operations: the model found nothing new to mask, hide or replace.")) : null,
       keep(`${t.id}:raw${a.attempt}`, fold([h("b", null, "Raw output"), h("span", { class: "muted" }, "shown here only, never logged")], h("pre", null, pretty), { open: !a.parsed })));
   }
 
@@ -244,7 +250,8 @@ const SecurityPage = (() => {
     if (t.status !== "passed" && !d.found.length) return null;
     const a = t.applied || {};
     const changed = a.changed_items || [];
-    const session = App.state.sessions.find((s) => s.id === t.session_id);
+    // Item refs need the full session (loaded for the selected one); otherwise show a short id.
+    const session = App.detail(t.session_id);
     const ref = (id) => { const n = session ? session.items.findIndex((i) => i.id === id) : -1; return n >= 0 ? `#${n + 1}` : id.slice(0, 8); };
     return h("div", { class: "card" },
       h("h3", null, "Effect on the outbound context"),

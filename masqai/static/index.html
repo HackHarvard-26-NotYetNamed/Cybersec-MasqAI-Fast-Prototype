@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>MasqAI · Local gateway</title>
+<title>MasqAI · local gateway</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect width=%2716%27 height=%2716%27 rx=%273%27 fill=%27%236be5c0%27/%3E%3C/svg%3E">
 <style>
 :root{color-scheme:dark;font:13px/1.4 system-ui,sans-serif;background:#0b1020;color:#e3e9fa;
   --line:#26314a;--panel:#111a2c;--panel2:#0e1627;--field:#162138;--edge:#364767;--muted:#8fa1c2;--accent:#6be5c0;--bad:#ff8fa3;--warn:#ffd27a;--info:#8ab4ff;
@@ -66,7 +67,14 @@ mark.secret{background:#6b2a3c;color:#ffe0e6;outline:1px solid #a54a62}
 mark.kept{background:none;color:inherit;outline:1px dashed #a5864a}
 mark.ph{background:#18485b;color:#bdf0ff;outline:1px solid #2f7d97}
 mark.ph.alias{background:#3b2f63;color:#e0d4ff;outline-color:#6d5bb0}
-mark.block{background:#4a3d14;color:var(--warn);outline:1px solid #8a7224}
+mark.block{background:#2a2f3a;color:#c3cbd9;outline:1px dashed #6b7690}
+mark.secret.model{outline:2px solid #a78bfa}
+mark.intel{background:#3d3214;color:#ffd27a;outline:none;text-decoration:underline dashed #ffd27a;text-underline-offset:3px}
+.pill.model{background:#2e2350;color:#c9b8ff}
+.item.flash{animation:flash 2.2s ease-out}
+@keyframes flash{0%{box-shadow:0 0 0 3px #a78bfa}100%{box-shadow:0 0 0 0 transparent}}
+#notice{position:fixed;right:14px;bottom:14px;max-width:520px;z-index:10}
+#tokenHelp{margin:10px 14px}
 .gap{display:block;width:100%;text-align:center;font:11px system-ui;color:var(--muted);background:#0d1526;border:0;border-top:1px dashed var(--line);border-bottom:1px dashed var(--line);border-radius:0;padding:2px}
 .gap:hover{color:var(--info)}
 /* context items */
@@ -165,22 +173,28 @@ dialog textarea{width:100%;height:55vh;font:var(--mono)}
   <h1>MasqAI<span>local gateway</span></h1>
   <div class="tabs" role="tablist">
     <button role="tab" id="tabContext" aria-selected="true" aria-controls="viewContext">Context<span class="count" id="countContext">0</span></button>
-    <button role="tab" id="tabSecurity" aria-selected="false" aria-controls="viewSecurity">Security model<span class="count" id="countSecurity">0</span></button>
-    <button role="tab" id="tabConfig" aria-selected="false" aria-controls="viewConfig">Configuration</button>
+    <button role="tab" id="tabSecurity" aria-selected="false" aria-controls="viewSecurity">Security<span class="count" id="countSecurity">0</span></button>
+    <button role="tab" id="tabMapping" aria-selected="false" aria-controls="viewMapping">Mapping<span class="count" id="countMapping">0</span></button>
+    <button role="tab" id="tabConfig" aria-selected="false" aria-controls="viewConfig">Config</button>
   </div>
   <span class="grow"></span>
   <span id="status">Connecting…</span>
 </div>
 
-<!-- Context: what the agent sent (left) versus what left this machine (right) -->
-<div id="viewContext" class="view page with-side" role="tabpanel">
+<div id="tokenHelp" class="banner bad" hidden>
+  <b>No admin token.</b> The control API needs the token printed when the gateway starts. Open the GUI with that URL
+  (<code>http://127.0.0.1:&lt;port&gt;/#token=…</code>). The token changes on every start and is never written to disk.
+</div>
+<div id="notice" class="banner" hidden></div>
+
+<!-- Context, the dual-reality inspector: what the agent sent (left) versus what reached the untrusted model (right) -->
+<div id="viewContext" class="view page" role="tabpanel">
   <aside>
     <div class="list-head"><strong>Sessions</strong><span class="muted" id="sessionCount"></span></div>
     <div id="sessions"></div>
     <div class="list-foot">RAM only · cleared on restart. A session is one agent conversation, matched by session hints or shared history.</div>
   </aside>
   <main id="contextMain"></main>
-  <div class="side" id="contextSide"></div>
 </div>
 
 <!-- Security model: each sanitize pass, its input, its answer, and what was applied -->
@@ -195,6 +209,10 @@ dialog textarea{width:100%;height:55vh;font:var(--mono)}
     <div class="list-foot">Last 100 passes, RAM only. Includes raw context: never logged or written to disk.</div>
   </aside>
   <main id="securityMain"></main>
+</div>
+
+<div id="viewMapping" class="view" role="tabpanel" hidden>
+  <main id="mappingMain"></main>
 </div>
 
 <div id="viewConfig" class="view config" role="tabpanel" hidden>
@@ -219,6 +237,7 @@ dialog textarea{width:100%;height:55vh;font:var(--mono)}
 <script src="/static/config.js"></script>
 <script src="/static/context.js"></script>
 <script src="/static/security.js"></script>
+<script src="/static/mapping.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

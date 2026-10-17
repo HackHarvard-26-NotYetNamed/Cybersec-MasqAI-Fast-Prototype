@@ -1,9 +1,10 @@
-// Context page: per session, what the agent sent (raw, stays on this machine) next to what was sent upstream.
+// Context page, the dual-reality inspector: per session, what the agent sent (raw, stays on this machine)
+// next to what went to the untrusted model.
 const ContextPage = (() => {
   const { h, text, short, plural, ago, align, marker, lines, pill } = UI;
   const main = document.getElementById("contextMain");
-  const side = document.getElementById("contextSide");
   const list = document.getElementById("sessions");
+  const seenRevision = new Map();   // item id -> last rendered revision, to flash rewritten items
 
   let selected = null;
   const filters = { changedOnly: false, kind: "all", query: "" };
@@ -13,7 +14,7 @@ const ContextPage = (() => {
 
   const KIND = {
     message: "message", tool_result: "tool result", tool_arguments: "tool call arguments",
-    system: "system prompt", tool_definition: "tool description", reasoning: "reasoning",
+    system: "system prompt", tool_definition: "tool description", reasoning: "reasoning", opaque: "opaque content",
   };
   const KIND_FILTERS = [
     ["all", "All items"], ["message", "Messages"], ["tool_result", "Tool results"], ["tool_arguments", "Tool call arguments"],
@@ -35,7 +36,6 @@ const ContextPage = (() => {
       return;
     }
     for (const s of [...sessions].reverse()) {
-      const changed = s.items.filter((i) => i.changed).length;
       list.append(h("button", {
         class: "entry" + (s.id === selected ? " active" : ""),
         title: s.id + (s.hint ? `\nhint: ${s.hint}` : ""),
@@ -43,8 +43,9 @@ const ContextPage = (() => {
       },
         h("div", { class: "l1" }, h("b", null, short(s.id)),
           s.rollbacks ? pill(`↶${s.rollbacks}`, "warn", `${plural(s.rollbacks, "rollback")}: the agent's history diverged (compaction, edit or retry) and the stored items were replaced`) : null,
-          s.parent_id ? pill("branch", "info", `Branched from ${s.parent_id}; inherits its mappings`) : null),
-        h("div", { class: "l2" }, `${plural(s.request_count, "request")} · ${s.items.length} items · ${changed} changed · ${plural(s.entities.length, "entity")} · ${ago(s.last_seen)}`)));
+          s.parent_id ? pill("branch", "info", `Branched from ${s.parent_id}; inherits its mappings and pseudonym`) : null,
+          s.in_flight ? pill("busy", "run", "A request or stream is in flight") : null),
+        h("div", { class: "l2" }, `${plural(s.request_count, "request")} · ${s.items} items · ${plural(s.entities, "mapping")} · ${ago(s.last_seen)}`)));
     }
   }
 
@@ -112,28 +113,37 @@ const ContextPage = (() => {
 
   function itemPills(item, raw, out) {
     const pills = [];
-    if (item.reasoning) pills.push(pill("protected", "warn", "Reasoning is passed through untouched: editing it would break its signature or encrypted content. Known values are highlighted if present."));
-    else if (isResponse(item)) pills.push(pill("from upstream", "info", "Observed in the upstream response. Ordinary text is passed through; placeholders in tool call arguments are restored to real values before the agent receives them."));
-    else if (!item.eligible) pills.push(pill("known mappings only", "dim", "System prompts and tool descriptions are not sent to the security model (they form the cached prefix); values already in the mapping table are still replaced."));
+    if (item.opaque) pills.push(pill("opaque", "dim", "Whitelisted content MasqAI can't read (an image, a base64 document): forwarded unread, shown only as a description."));
+    else if (item.reasoning) pills.push(pill("protected", "warn", "Reasoning is passed through untouched: editing it would break its signature or encrypted content. Known values are highlighted if present."));
+    else if (isResponse(item)) pills.push(pill("from upstream", "info", "Observed in the untrusted model's response. Its text is passed through unmodified; placeholders in tool-call arguments are restored before the agent receives them."));
+    else if (item.kind === "system" || item.kind === "tool_definition") pills.push(pill("mask only", "dim", "Inspected once per distinct content, then reused so the prompt cache stays stable. Never hidden or replaced."));
     if (item.changed) {
       if (TOKEN.test(out)) pills.push(pill("masked", "ok", "Contains placeholders"));
-      if (out.includes("…[MASQ_BLOCK:")) pills.push(pill("collapsed", "warn", "Some lines were collapsed by the security model (Rephrase)"));
-    } else if (!item.reasoning && !isResponse(item)) pills.push(pill("unchanged", "dim"));
-    if (item.revision > 0) pills.push(pill(`re-sanitized ×${item.revision}`, "warn", "This already-sent item changed after a later discovery (retroactive re-mask). The upstream prompt cache for this prefix is lost."));
+      if ((item.spans || []).some((s) => s.origin === "model")) pills.push(pill("found by security model", "model", "At least one value here was missed by the rules and masked by the security model"));
+      if ((item.hides || []).length) pills.push(pill(`${item.hides.length} hidden`, "warn", "Lines of intel hidden by the security model (lossy)"));
+      if ((item.replaces || []).length) pills.push(pill(`${item.replaces.length} replaced`, "warn", "Intel replaced with neutral words by the security model (lossy, never restored)"));
+    } else if (!item.reasoning && !isResponse(item) && !item.opaque) pills.push(pill("unchanged", "dim"));
+    const vetoed = (item.unmasked || []).filter((u) => u.reason.startsWith("vetoed")).length;
+    if (vetoed) pills.push(pill(`${vetoed} vetoed`, "model", "Automatic masks the security model undid"));
+    if (item.revision > 0 && !isResponse(item)) pills.push(pill(`re-sanitized ×${item.revision}`, "warn", "This already-sent item changed after a later discovery (retroactive re-mask or relink). The upstream prompt cache for this prefix is broken, on purpose."));
     return pills;
   }
 
-  function itemCard(item, index, markOut) {
+  function itemCard(item, index, sessionMarkOut) {
     const raw = text(item.original), out = text(item.sanitized);
+    const markOut = UI.outMarker(sessionMarkOut, item.replaces || []);
+    // Flash an already-sent item whose outbound text was rewritten (re-mask or relink), not streamed responses.
+    const flash = !isResponse(item) && seenRevision.has(item.id) && item.revision > seenRevision.get(item.id);
+    seenRevision.set(item.id, item.revision);
     const changed = raw !== out;
     // Raw-side marks come from the exact spans the gateway applied, not from re-searching values.
     // Reasoning has no spans; known values in it are marked by text so the user can see them.
-    const markRaw = item.reasoning || isResponse(item) ? textMarker : UI.spanMarker(item.spans || [], item.unmasked || [], item.collapses || []);
+    const markRaw = item.reasoning || isResponse(item) ? textMarker : UI.spanMarker(item.spans || [], item.unmasked || [], item.replaces || []);
     const removed = changed ? raw.split("\n").length - out.split("\n").length : 0;
     const kept = (item.unmasked || []).length;
     const note = (changed ? `${raw.length} → ${out.length} chars${removed > 0 ? ` · ${removed} lines fewer` : ""}` : `${raw.split("\n").length} lines · ${raw.length} chars`)
       + (kept ? ` · ${kept} known ${kept === 1 ? "copy" : "copies"} left as-is` : "");
-    return h("section", { class: "item" + (changed ? " changed" : ""), id: "item-" + item.id, dataset: { item: item.id } },
+    return h("section", { class: "item" + (changed ? " changed" : "") + (flash ? " flash" : ""), id: "item-" + item.id, dataset: { item: item.id } },
       h("header", null,
         h("span", { class: "idx" }, `#${index + 1}`),
         h("span", { class: "role" }, item.role),
@@ -173,6 +183,8 @@ const ContextPage = (() => {
         pill(plural(session.entities.length, "mapping"), "dim"),
         outChars < rawChars ? pill(`${Math.round((1 - outChars / rawChars) * 100)}% fewer chars sent`, "info", `${rawChars} raw → ${outChars} sent (request items)`) : null,
         session.rollbacks ? pill(plural(session.rollbacks, "rollback"), "warn", "History diverged and the stored items were replaced") : null,
+        session.remasks ? pill(`cache broken ×${session.remasks}`, "warn", "Already-sent items re-sanitized after a later discovery or relink. Each one breaks the upstream prompt cache; accepted for privacy.") : null,
+        (session.relinks || []).length ? pill(plural(session.relinks.length, "relink"), "model", "An earlier masked fragment was linked to a newly found full value; its earlier occurrences are now sent as <$…>") : null,
         session.parent_id ? pill(`branched from ${short(session.parent_id)}`, "info", session.parent_id) : null),
       h("span", { class: "grow" }),
       h("select", { onchange: (e) => { filters.kind = e.target.value; render(); } },
@@ -185,21 +197,28 @@ const ContextPage = (() => {
   const legend = () => h("div", { class: "legend" },
     h("span", null, h("span", { class: "sw del" }, "red line"), " raw line that did not go out as-is"),
     h("span", null, h("span", { class: "sw ins" }, "green line"), " what went out instead"),
-    h("span", null, h("mark", { class: "secret" }, "value"), " masked here"),
+    h("span", null, h("mark", { class: "secret" }, "value"), " masked by a detector or auto copy"),
+    h("span", null, h("mark", { class: "secret model" }, "value"), " found by the security model"),
     h("span", null, h("mark", { class: "kept" }, "value"), " known value left as-is (inside a word, or vetoed)"),
     h("span", null, h("mark", { class: "ph" }, "<TYPE_id>"), " placeholder"),
-    h("span", null, h("mark", { class: "ph alias" }, "<$TYPE_id>"), " placeholder for a partial form"),
-    h("span", null, h("mark", { class: "block" }, "…[MASQ_BLOCK]…"), " collapsed lines"),
+    h("span", null, h("mark", { class: "ph alias" }, "<$TYPE_id>"), " alias (partial form)"),
+    h("span", null, h("mark", { class: "block" }, "…[hidden: …]…"), " intel hidden"),
+    h("span", null, h("mark", { class: "intel" }, "neutral words"), " intel replaced"),
     h("span", null, "Hover a mark for its meaning."));
 
   function render() {
     const sessions = App.state.sessions;
     renderList(sessions);
-    const session = sessions.find((s) => s.id === selected);
-    if (!session) {
+    const summary = sessions.find((s) => s.id === selected);
+    if (!summary) {
       main.replaceChildren(h("div", { class: "empty" }, "Route an agent request through MasqAI to inspect its context.",
         h("br"), h("small", null, "Point the agent at ", h("code", null, location.origin + "/v1"), " (OpenAI style) or ", h("code", null, location.origin), " (Anthropic style).")));
-      side.replaceChildren();
+      return;
+    }
+    const session = App.detail(selected);
+    if (!session) {
+      main.replaceChildren(h("div", { class: "empty" }, "Loading session…"));
+      App.loadDetail(selected);
       return;
     }
     textMarker = marker(session.entities, "raw");
@@ -245,11 +264,10 @@ const ContextPage = (() => {
     main.replaceChildren(
       toolbar(session, visible.length, session.items.length),
       legend(),
-      h("div", { class: "cols head" }, h("div", null, "Agent sent · raw, never leaves this machine"), h("div", null, "Sent upstream · what the provider sees")),
+      h("div", { class: "cols head" }, h("div", null, "Agent sent · raw, never leaves this machine"), h("div", null, "Sent to the untrusted model · what its operator sees")),
       ...content);
     main.scrollTop = scroll;
     if (searching) { const el = main.querySelector("input[type=search]"); el.focus(); el.setSelectionRange(caret, caret); }
-    renderSide(session);
     if (focusItem) {
       const target = document.getElementById("item-" + focusItem);
       focusItem = null;
@@ -257,36 +275,18 @@ const ContextPage = (() => {
     }
   }
 
-  function renderSide(session) {
-    const outText = session.items.map((i) => text(i.sanitized)).join("\n");
-    const ORIGIN = { model: "security model", "detector:pattern": "pattern", "detector:host": "this machine", "detector:custom": "custom value" };
-    const rows = session.entities.map((e) => {
-      const uses = outText.split(e.token).length - 1 + outText.split(e.token.replace("<", "<$")).length - 1;
-      return h("tr", { style: "cursor:pointer", title: "Show items containing this value", onclick: () => { filters.query = e.canonical; render(); } },
-        h("td", { class: "mono" }, h("mark", { class: "ph" }, e.token),
-          e.merged_into ? h("div", { class: "aliases" }, "sent as ", h("mark", { class: "ph alias" }, e.merged_into.replace("<", "<$"))) : null),
-        h("td", { class: "mono" }, e.canonical,
-          e.aliases?.length ? h("div", { class: "aliases" }, "marked forms: ", e.aliases.join(", ")) : null,
-          h("div", { class: "aliases" }, ORIGIN[e.origin] || e.origin)),
-        h("td", { class: "muted" }, String(uses)));
-    });
-    side.replaceChildren(
-      h("h3", null, "Mapping table ", h("span", { class: "muted", style: "font-weight:400" }, `· ${session.entities.length}`)),
-      session.entities.length
-        ? h("table", null, h("thead", null, h("tr", null, h("th", null, "Placeholder"), h("th", null, "Real value (RAM only)"), h("th", { title: "Occurrences in the text sent upstream" }, "Uses"))), h("tbody", null, rows))
-        : h("div", { class: "empty" }, "No mappings yet."),
-      h("div", { class: "list-foot" }, "Exact copies of a value are masked automatically unless they sit inside a longer word. Marked forms (<$…>) are masked only where the security model pointed at them. Tool call arguments get real values back before the agent runs the tool. Click a row to find it in the context."));
-  }
-
   function select(id, itemId) {
     selected = id;
     if (itemId) { focusItem = itemId; filters.changedOnly = false; filters.kind = "all"; filters.query = ""; }
+    App.loadDetail(id);
     render();
   }
 
   return {
     render,
     select,
+    selectedId: () => selected,
+    setQuery: (q) => { filters.query = q; render(); },
     ensureSelection: () => { if (!App.state.sessions.some((s) => s.id === selected)) selected = App.state.sessions.at(-1)?.id ?? null; },
   };
 })();

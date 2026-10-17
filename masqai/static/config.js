@@ -174,12 +174,9 @@ const ConfigPanel = (() => {
           { value: "anthropic", label: "Anthropic", desc: "key sent as x-api-key, plus anthropic-version: 2023-06-01 if the agent did not send one" },
         ]), "Only selects how the key is attached. Request bodies are forwarded in whatever API format the agent used and are ", b("never converted"),
           ", so the provider must support that format (e.g. Anthropic Messages for Claude Code)."),
-        field("API key variable", `${loc}.api_key_env`, input(p, "api_key_env", {
-          placeholder: "OPENROUTER_API_KEY",
-          onchange: (e) => updateEnvNote(e.target, p.api_key_env.trim()),
-        }),
-          "The ", b("name"), " of an environment variable that holds the key, never the key itself. The key is read from the gateway's environment when each request is sent; it is not stored in the config or shown here. Set it before starting the gateway (",
-          c('$env:OPENROUTER_API_KEY = "…"'), ") and restart after changing it. Leave blank for providers that need no key, such as local Ollama.",
+        field("API key variable", `${loc}.api_key_env`, envSelect(p),
+          "The ", b("name"), " of an environment variable that holds the key, never the key itself. Only names referenced in ", c("masqai.json"),
+          " at startup can be chosen (they are frozen when the gateway starts); to use another variable, add it to the file and restart. Choose (none) for providers that need no key, such as local Ollama.",
           envNote(p.api_key_env.trim())),
         field("Extra headers", `${loc}.headers`, h("div", { class: "rows" },
           p.headers.map((hd, j) => h("div", { class: "row" },
@@ -232,6 +229,15 @@ const ConfigPanel = (() => {
         h("button", { onclick: () => { ui.routes.push({ alias: "", provider: providerNames()[0] || "", model: "" }); edited(); render(); focusLast(); } }, "+ Add alias")));
   }
 
+  function envSelect(p) {
+    const names = meta.env_names || [];
+    const current = p.api_key_env || "";
+    const options = [h("option", { value: "", selected: current === "" }, "(none)")];
+    for (const name of names) options.push(h("option", { value: name, selected: name === current }, name));
+    if (current && !names.includes(current)) options.push(h("option", { value: current, selected: true }, `${current} (not allowed: not in masqai.json at startup)`));
+    return h("select", { id: "f" + ++uid, onchange: (e) => { p.api_key_env = e.target.value; edited(e.target); renderKeepingFocus(); } }, options);
+  }
+
   function securitySection() {
     const s = ui.security;
     const provider = ui.providers.find((p) => p.name === s.provider);
@@ -242,19 +248,17 @@ const ConfigPanel = (() => {
     try { host = provider ? new URL(provider.base_url).hostname : null; } catch { host = null; }
     const loopback = host && (host === "localhost" || host === "::1" || host === "[::1]" || /^127\./.test(host));
     if (provider && host && !loopback) {
-      notes.push(h("div", { class: "warn" }, `Raw context and the full mapping table (real values of every placeholder) will be sent to ${host}.`,
-        meta.features.remote_security_check && !ui.allow_remote_security_model ? " Remote security models are disallowed below, so these calls will be refused and requests fail closed." : ""));
+      notes.push(h("div", { class: "warn" }, `Raw context and the full mapping table (real values of every placeholder) would be sent to ${host}.`,
+        !s.allow_remote_security_model ? " Remote security models are not allowed below, so these calls are refused and requests fail closed." : ""));
     }
     if (provider && provider.format !== s.api_format)
       notes.push(h("div", { class: "help" }, `Note: provider "${provider.name}" uses ${provider.format} authentication, but the security call uses the API format chosen here (${s.api_format}) for both its endpoint and its key header.`));
-    const remote = meta.features.remote_security_check
-      ? field("Allow remote security model", "allow_remote_security_model",
-        checkbox(ui, "allow_remote_security_model", "Allow a security provider that is not on this machine", { rerender: true }),
-        "The security model sees ", b("raw"), " context and the mapping table. When unchecked, a security provider whose base URL is not a loopback address (",
-        c("127.0.0.1"), ", ", c("localhost"), ") is refused and requests fail closed.")
-      : null;
+    const remote = field("Allow remote security model", "security.allow_remote_security_model",
+      checkbox(s, "allow_remote_security_model", "Allow a security provider that is not on this machine", { rerender: true }),
+      "Off by default. The security model sees ", b("raw"), " context and the mapping table. When unchecked, a security provider whose base URL is not literally loopback (",
+      c("127.0.0.0/8"), ", ", c("::1"), ", ", c("localhost"), "; no DNS lookup) is refused before anything is sent, and requests fail closed.");
     return section("security", "Security model",
-      "A second LLM that inspects each new context item after the deterministic detectors. It points at exact occurrences to mask, marks partial forms of known values, and may collapse noisy tool output.",
+      "The trusted model that inspects context inline, after the deterministic detectors and before anything reaches the untrusted model. It masks secrets the rules missed, vetoes wrong automatic masks, links partial forms, and hides or replaces intel in tool results.",
       h("div", { class: "card" },
         field("Enabled", "security.enabled", checkbox(s, "enabled", "Inspect requests with the security model", { rerender: true }),
           "When on, a request waits for the security model before it is forwarded. Each operation it returns is checked on its own; rejected ones are sent back once for correction. If the model fails, times out, or a correction is still invalid, the request is ",
@@ -268,14 +272,14 @@ const ConfigPanel = (() => {
           { value: "openai", label: "OpenAI Chat Completions", desc: "POST /v1/chat/completions with JSON mode; Ollama, vLLM, OpenRouter, OpenAI" },
           { value: "anthropic", label: "Anthropic Messages", desc: "POST /v1/messages with x-api-key" },
         ]), "The API the security call uses, independent of what your agent uses. It decides both the endpoint and how the provider's key is attached. Most local servers only offer the OpenAI format."),
-        field("Timeout (seconds)", "security.timeout_seconds", input(s, "timeout_seconds", { type: "number", min: 1, step: 1 }),
+        field("Timeout (seconds)", "security.timeout_s", input(s, "timeout_s", { type: "number", min: 1, step: 1 }),
           "Maximum wait for one security call. Exceeding it blocks the request (fail closed). Local models on CPU can need 30 to 120 seconds for long contexts."),
         field("Context mode", "security.context_mode", radios(s, "context_mode", [
           { value: "recent", label: "Recent", desc: "use the three limits below; fast, fits small models" },
           { value: "full", label: "Full", desc: "the same input with every limit removed: all earlier operations, whole items around them, all tool context; most thorough, slowest, can exceed a small model's context window and then fail closed" },
         ]), "Either way the model inspects only items it has not inspected before, sees every user and assistant message for the task intent, and values it finds are masked across the whole history."),
         field("Earlier operations (N)", "security.nearest_ops", input(s, "nearest_ops", { type: "number", min: -1, step: 1, disabled: s.context_mode !== "recent" }),
-          "How many of the model's earlier masks and collapses to show it, nearest to the new items first. ", c("-1"), " shows all. They let it keep placeholders consistent and mark partial forms of known values. Ignored in Full mode."),
+          "How many of the model's earlier operations (masks, hides, replaces) to show it, nearest to the new items first. ", c("-1"), " shows all. They let it keep placeholders consistent and mark partial forms of known values. Ignored in Full mode."),
         field("Lines around each (k)", "security.op_context_lines", input(s, "op_context_lines", { type: "number", min: 0, step: 1, disabled: s.context_mode !== "recent" }),
           "Raw lines shown above and below each earlier operation. Ignored in Full mode (whole items)."),
         field("Recent tool context", "security.recent_items", input(s, "recent_items", { type: "number", min: 0, step: 1, disabled: s.context_mode !== "recent" }),
@@ -289,23 +293,23 @@ const ConfigPanel = (() => {
           h("div", { class: "row" },
             h("button", { class: "small", onclick: () => { s.system_prompt = meta.default_security_prompt || ""; edited(); render(); } }, "Load built-in instructions to edit"),
             h("button", { class: "small", onclick: () => { s.system_prompt = ""; edited(); render(); } }, "Clear (use built-in)"))),
-          "System prompt for the security model. Leave blank to use the built-in one. A custom prompt must keep the same JSON contract (",
-          c('{"operations": [...]}'), " with ", c("mask"), ", ", c("collapse"), ", ", c("relink"), " and, if enabled, ", c("unmask"), " operations), otherwise its answers are rejected and requests are blocked."),
+          "Sets the security model's sensitivity. Leave blank to use the built-in one (", c("masqai/prompts/security.md"), "). A custom prompt must keep the JSON contract (",
+          c('{"operations": [...]}'), " with ", c("mask"), ", ", c("hide"), ", ", c("replace"), ", ", c("relink"), " and, if enabled, ", c("unmask"),
+          "). A prompt written for the prototype (", c("collapse"), ") is rejected when applied, instead of failing every request."),
         remote));
   }
 
   function detectorsSection() {
     const d = ui.detectors;
-    const ci = meta.features.case_insensitive_types || [];
-    const wb = meta.features.word_bounded_types || [];
-    const matching = ci.length || wb.length
-      ? [" Types ", ci.map((t, i) => [i ? ", " : "", c(t)]), " match regardless of case", wb.length ? ["; ", wb.map((t, i) => [i ? ", " : "", c(t)]), " only match whole words"] : "", "."]
-      : "";
+    const matching = "";
     return section("detectors", "Detectors",
       "Deterministic masking that runs on every request, with or without the security model. Found values are replaced by placeholders such as <EMAIL_3fa9c2d1> (not inside longer words: ANDY in HANDY stays), and tool calls coming back are restored to the real values.",
       h("div", { class: "card" },
-        field("Built-in patterns", "detectors.patterns", h("div", { class: "chips" }, (meta.detector_patterns || []).map((p) => h("span", { class: "chip" }, p))),
-          "Always on: API keys, tokens, emails and private keys found by pattern anywhere in the context."),
+        field("Rules", "detectors.rules_dir", h("div", { class: "rows" },
+          input(d, "rules_dir", { placeholder: "masqai/rules" }),
+          h("div", { class: "chips" }, (meta.detector_rules || []).map((p) => h("span", { class: "chip" }, p)))),
+          "Detector rules are data: ", c("*.toml"), " tables in this folder (patterns, and a dictionary of secret-like key names whose ", b("values"),
+          " are masked). Detectors only ever mask; they are fast and can't be prompt-injected. The chips are the rules loaded now."),
         field("This machine", "detectors.detect_host_identifiers",
           h("div", { class: "rows" },
             checkbox(d, "detect_host_identifiers", "Mask this machine's host name, user name and home directory", { rerender: true }),
@@ -330,6 +334,8 @@ const ConfigPanel = (() => {
     return section("headers", "Request headers",
       "Which of the agent's HTTP headers are passed on to the provider.",
       h("div", { class: "card" },
+        field("User-Agent", "headers.user_agent", input(policy, "user_agent", { placeholder: "masqai/0.2.0" }),
+          "Replaces the client's User-Agent, which names the agent, its version and often the OS. Leave empty to forward the client's own."),
         field("Mode", "headers.mode", radios(policy, "mode", [
           { value: "blocklist", label: "Blocklist (default)", desc: "forward every header except the ones listed; most transparent" },
           { value: "allowlist", label: "Allowlist", desc: "forward only the headers listed; hides client-identifying headers such as custom app tags" },
@@ -339,7 +345,9 @@ const ConfigPanel = (() => {
           c("Connection"), " header are dropped too."),
         field(block ? "Blocklist" : "Blocklist (inactive)", "headers.blocklist",
           h("div", { class: "rows" }, stringList(policy.blocklist, { placeholder: "header name, e.g. cookie or x-internal-*", disabled: !block }), h("div", null, resetButton("blocklist", meta.default_blocklist || []))),
-          "Used in Blocklist mode. Case-insensitive; a trailing ", c("*"), " matches a prefix (", c("x-internal-*"), "). The defaults remove other providers' key headers and cookies."),
+          "Used in Blocklist mode. Case-insensitive; a trailing ", c("*"), " matches a prefix (", c("x-forwarded-*"), "). The defaults remove other providers' key headers, cookies, client fingerprints (",
+          c("x-stainless-os"), ", ", c("-arch"), ", ", c("-runtime"), ", …), client session ids, proxy and referer headers. ", c("user"), ", ", c("metadata.user_id"), ", ",
+          c("safety_identifier"), " and ", c("prompt_cache_key"), " are always replaced with a per-session pseudonym."),
         field(block ? "Allowlist (inactive)" : "Allowlist", "headers.allowlist",
           h("div", { class: "rows" }, stringList(policy.allowlist, { placeholder: "header name, e.g. user-agent or x-stainless-*", disabled: block }), h("div", null, resetButton("allowlist", meta.default_allowlist || []))),
           "Used in Allowlist mode. Same matching rules. Keep ", c("content-type"), ", ", c("accept"), " and any ", c("anthropic-beta"), "/", c("openai-beta"),
@@ -347,14 +355,13 @@ const ConfigPanel = (() => {
   }
 
   function sessionsSection() {
-    if (!meta.features.sessions || !ui.sessions) return null;
     return section("sessions", "Sessions",
-      "Sessions, their original content and mapping tables live only in memory. These limits bound memory use; sessions are never written to disk.",
+      "Sessions, their raw content and mapping tables live only in RAM; nothing is written to disk. These limits bound memory use and how long raw context is kept.",
       h("div", { class: "card" },
-        field("Maximum sessions", "sessions.max_sessions", input(ui.sessions, "max_sessions", { type: "number", min: 0, step: 1 }),
-          "When exceeded, the least recently used sessions are forgotten (their placeholders get new values if the conversation returns). 0 means no limit."),
-        field("Forget after idle (seconds)", "sessions.idle_seconds", input(ui.sessions, "idle_seconds", { type: "number", min: 0, step: 60 }),
-          "Sessions without a request for this long are forgotten. 0 keeps them until the gateway restarts. A session handling a request is never removed.")));
+        field("Maximum sessions", "retention.max_sessions", input(ui.retention, "max_sessions", { type: "number", min: 1, step: 1 }),
+          "Past this, the least recently used session is forgotten. A session with a request in flight or an open stream is never evicted; the next-oldest goes instead."),
+        field("Forget after idle (hours)", "retention.idle_ttl_h", input(ui.retention, "idle_ttl_h", { type: "number", min: 0.1, step: 1 }),
+          "Sessions without a request for this long are forgotten. Checked every 60 s, after each request and after a config change.")));
   }
 
   function gatewaySection() {
@@ -363,7 +370,9 @@ const ConfigPanel = (() => {
       h("div", { class: "card" },
         field("Listening on", "port", h("input", { type: "text", value: meta.listen || `http://${ui.host}:${ui.port}`, readOnly: true }),
           "Fixed at startup. To change the port, edit ", c("port"), " in ", c("masqai.json"), " and restart. The host is always ", c("127.0.0.1"),
-          " because MasqAI has no authentication. Point OpenAI-style agents at ", c((meta.listen || "") + "/v1"), " and Anthropic-style agents at ", c(meta.listen || ""), "."),
+          ". The control API needs the admin token printed at startup; the agent endpoints don't. Point OpenAI-style agents at ", c((meta.listen || "") + "/v1"), " and Anthropic-style agents at ", c(meta.listen || ""), "."),
+        field("Unknown content", "pass_unknown", checkbox(ui, "pass_unknown", "Forward content MasqAI can't inspect (images in OpenAI format, files, audio, …) raw"),
+          b("Off by default"), ": such requests are refused with HTTP 422 before a session exists, saying where the content was and its type, never the content. When on, it is forwarded raw with a warning on the Security page."),
         field("Upstream timeout (seconds)", "upstream_timeout_seconds", input(ui, "upstream_timeout_seconds", { type: "number", min: 1, step: 1 }),
           "Applies to each upstream request: the longest wait to connect, or between two chunks of a response. Long streaming answers are fine as long as data keeps arriving.")));
   }
@@ -374,14 +383,14 @@ const ConfigPanel = (() => {
     ["detectors", "Detectors"], ["headers", "Request headers"], ["sessions", "Sessions"], ["gateway", "Gateway"],
   ];
   const sectionOf = (loc) => ({
-    providers: "providers", routes: "routing", default_route: "routing", security: "security", allow_remote_security_model: "security",
-    detectors: "detectors", headers: "headers", sessions: "sessions",
+    providers: "providers", routes: "routing", default_route: "routing", security: "security",
+    detectors: "detectors", headers: "headers", retention: "sessions",
   })[loc[0]] || "gateway";
 
   function render() {
     if (!ui) return;
     const scroll = window.scrollY;
-    form.replaceChildren(providersSection(), routingSection(), securitySection(), detectorsSection(), headersSection(), sessionsSection() || "", gatewaySection());
+    form.replaceChildren(providersSection(), routingSection(), securitySection(), detectorsSection(), headersSection(), sessionsSection(), gatewaySection());
     const unplaced = errors.filter((e) => !placeError(e));
     const counts = {};
     for (const e of errors) counts[sectionOf(e.loc)] = (counts[sectionOf(e.loc)] || 0) + 1;
@@ -461,7 +470,7 @@ const ConfigPanel = (() => {
   async function checkEnv(name) {
     envStatus.set(name, undefined);
     try {
-      const response = await fetch(`/api/env/${encodeURIComponent(name)}`);
+      const response = await UI.api(`/api/env/${encodeURIComponent(name)}`);
       envStatus.set(name, response.ok ? (await response.json()).set : false);
     } catch {
       envStatus.delete(name);
@@ -530,7 +539,7 @@ const ConfigPanel = (() => {
     applyButton.disabled = true;
     saveState.textContent = "Applying…";
     try {
-      const response = await fetch("/api/config", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(toConfig(ui)) });
+      const response = await UI.api("/api/config", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(toConfig(ui)) });
       const body = await response.json();
       if (!response.ok) {
         errors = body.errors || [{ loc: [], msg: body.error || `HTTP ${response.status}` }];
@@ -555,7 +564,7 @@ const ConfigPanel = (() => {
   }
 
   async function load() {
-    const [configResponse, metaResponse] = await Promise.all([fetch("/api/config"), fetch("/api/config/meta")]);
+    const [configResponse, metaResponse] = await Promise.all([UI.api("/api/config"), UI.api("/api/config/meta")]);
     saved = await configResponse.json();
     meta = await metaResponse.json();
     meta.features ||= {};
