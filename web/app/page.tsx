@@ -3,9 +3,15 @@ import {
   ArrowRight,
   Ban,
   Binary,
+  Boxes,
   BrainCircuit,
+  Check,
   Copy,
   Fingerprint,
+  ShieldX,
+  SlidersHorizontal,
+  Sparkles,
+  WifiOff,
   FolderTree,
   KeyRound,
   RotateCcw,
@@ -15,6 +21,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { MirrorHero } from "@/components/landing/mirror";
+import rules from "@/lib/detector-rules.json";
 
 export default function Home() {
   return (
@@ -34,10 +41,16 @@ export default function Home() {
           </p>
           <div className="mt-7 flex flex-wrap gap-3">
             <Link
-              href="/demo"
+              href="/try"
               className="inline-flex min-h-11 items-center gap-2 rounded-md bg-primary px-5 font-medium text-primary-foreground hover:bg-primary/85"
             >
-              Watch the replays <ArrowRight aria-hidden className="size-4" />
+              Try it live <ArrowRight aria-hidden className="size-4" />
+            </Link>
+            <Link
+              href="/demo"
+              className="inline-flex min-h-11 items-center gap-2 rounded-md border bg-card px-5 font-medium hover:bg-accent"
+            >
+              Watch the replays
             </Link>
             <Link
               href="/results"
@@ -142,7 +155,7 @@ export default function Home() {
               threat="Whoever obtains it: a leak, a shared team key, a borrowed key."
               defense="Key Enigma"
               defenseText="Rotates the upstream key continuously, so a leaked key dies within minutes. Canary keys catch a relay that reuses your traffic."
-              status="Stretch goal: planned"
+              status="In progress"
               href="/trust"
             />
             <ThreatCard
@@ -151,7 +164,7 @@ export default function Home() {
               threat="Whoever operates the endpoint: a provider, a cheap reseller, a relay, an opaque agent app."
               defense="The sanitizer"
               defenseText="Detectors and a local security model mask secrets and hide or replace intel before anything reaches the untrusted model, then restore real values in tool calls."
-              status="Prototype works; rebuild in progress"
+              status="Working, tested on real agent runs"
               href="/how-it-works"
             />
           </div>
@@ -162,7 +175,7 @@ export default function Home() {
         <h2 id="pipeline" className="text-3xl font-semibold tracking-tight">
           Every request, inspected before it leaves
         </h2>
-        <ol className="mt-8 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <ol className="mt-8 grid gap-4 md:grid-cols-2 lg:grid-cols-5">
           <Step n={1} icon={<Binary aria-hidden className="size-5" />} title="Detectors">
             Rule tables for keys, PEM blocks, emails, cloud tokens, passwords and host identifiers. Fast, can’t be
             prompt-injected, and they only ever mask.
@@ -175,7 +188,11 @@ export default function Home() {
             Adds the masks the rules missed, vetoes wrong auto masks, links partial forms, and hides or replaces intel in
             tool results.
           </Step>
-          <Step n={4} icon={<RotateCcw aria-hidden className="size-5" />} title="Restore">
+          <Step n={4} icon={<ShieldX aria-hidden className="size-5" />} title="Check tool calls">
+            A tool call that would send a secret off your machine is rejected: it becomes a harmless{" "}
+            <code className="font-mono">echo</code> the untrusted model reads, or an HTTP 400.
+          </Step>
+          <Step n={5} icon={<RotateCcw aria-hidden className="size-5" />} title="Restore">
             In tool-call arguments only, placeholders become real values again, locally. The untrusted model’s text is
             never modified.
           </Step>
@@ -184,7 +201,8 @@ export default function Home() {
           <Ban aria-hidden className="mt-0.5 size-5 shrink-0 text-leak" />
           <span>
             <strong className="font-semibold">Fails closed.</strong> Security model down or answering nonsense: 502.
-            Content it can’t inspect: 422. Unsupported endpoint: 404. Nothing is ever sent raw.
+            Content it can’t inspect: 422. Unsupported endpoint: 404. A tool call it can’t clear: rejected. Nothing is
+            ever sent raw.
           </span>
         </p>
         <div className="mt-8 flex flex-wrap gap-3">
@@ -202,7 +220,91 @@ export default function Home() {
           </Link>
         </div>
       </section>
+
+      <section aria-labelledby="choose" className="border-t bg-card/50">
+        <div className="mx-auto grid max-w-7xl gap-8 px-4 py-14 sm:px-6 lg:grid-cols-[1fr_1.3fr]">
+          <div>
+            <p className="flex items-center gap-2 font-mono text-sm tracking-wide text-muted-foreground uppercase">
+              <SlidersHorizontal aria-hidden className="size-4" /> Your rules, not a preset
+            </p>
+            <h2 id="choose" className="mt-2 text-3xl font-semibold tracking-tight text-balance">
+              You decide what counts as secret
+            </h2>
+            <p className="mt-3 text-lg text-pretty text-muted-foreground">
+              Switch categories on or off in the gateway&apos;s settings. It&apos;s enforced in code, not just asked of the
+              model: detectors skip what you switched off, and anything the model still proposes for it is ignored.
+            </p>
+            <Link href="/try" className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-md bg-primary px-5 font-medium text-primary-foreground hover:bg-primary/85">
+              Try the switches <ArrowRight aria-hidden className="size-4" />
+            </Link>
+          </div>
+          <div className="space-y-4">
+            {(["secret", "intel"] as const).map((kind) => (
+              <div key={kind} className="rounded-xl border bg-card p-5">
+                <p className="font-semibold">
+                  {kind === "secret" ? "Secrets" : "Intel"}{" "}
+                  <span className="font-normal text-muted-foreground">
+                    {kind === "secret" ? "masked, restored in your tool calls" : "hidden or replaced by the security model"}
+                  </span>
+                </p>
+                <ul className="mt-3 flex flex-wrap gap-2">
+                  {rules.categories.filter((c) => c.kind === kind).map((c) => (
+                    <li key={c.id} title={c.description} className="inline-flex items-center gap-1.5 rounded-full border border-restored/50 bg-restored/10 px-3 py-1 text-sm">
+                      {kind === "secret" ? <Check aria-hidden className="size-3.5 text-restored" /> : <Sparkles aria-hidden className="size-3.5 text-model" />}
+                      {c.label}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section aria-labelledby="daytona" className="border-t">
+        <div className="mx-auto grid max-w-7xl gap-8 px-4 py-14 sm:px-6 lg:grid-cols-[1.2fr_1fr]">
+          <div>
+            <p className="flex items-center gap-2 font-mono text-sm tracking-wide text-muted-foreground uppercase">
+              <Boxes aria-hidden className="size-4" /> Measured, in Daytona sandboxes
+            </p>
+            <h2 id="daytona" className="mt-2 text-3xl font-semibold tracking-tight text-balance">
+              MasqAI protects the context. Daytona contains the actions.
+            </h2>
+            <p className="mt-3 text-lg text-pretty text-muted-foreground">
+              Our eval runs a real agent on six coding tasks with planted secrets. Every command it runs executes in a
+              fresh Daytona sandbox with its network blocked, and is deleted afterwards. We count what reaches the
+              untrusted model, with and without MasqAI.
+            </p>
+            <div className="mt-5 flex flex-wrap gap-3">
+              <Link href="/how-it-works#daytona-title" className="inline-flex min-h-11 items-center gap-2 rounded-md border bg-card px-5 font-medium hover:bg-accent">
+                How we use Daytona <ArrowRight aria-hidden className="size-4" />
+              </Link>
+              <Link href="/results" className="inline-flex min-h-11 items-center gap-2 rounded-md border bg-card px-5 font-medium hover:bg-accent">
+                See the numbers
+              </Link>
+            </div>
+          </div>
+          <div className="grid content-start gap-3 sm:grid-cols-2">
+            <Stat value="29 / 30" label="runs leaked a planted secret without MasqAI" tone="text-leak" />
+            <Stat value="30 / 30" label="tasks still succeeded: the leak is silent" tone="text-foreground" />
+            <Stat value="0" label="leftover sandboxes: each is deleted, then a label sweep checks" tone="text-restored" />
+            <Stat icon={<WifiOff aria-hidden className="size-5" />} value="Blocked" label="outbound network in every sandbox, verified live" tone="text-restored" />
+          </div>
+        </div>
+      </section>
     </>
+  );
+}
+
+function Stat({ value, label, tone, icon }: { value: string; label: string; tone: string; icon?: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border bg-card p-5">
+      <p className={`flex items-center gap-2 font-mono text-3xl font-semibold ${tone}`}>
+        {icon}
+        {value}
+      </p>
+      <p className="mt-1 text-sm text-pretty text-muted-foreground">{label}</p>
+    </div>
   );
 }
 
