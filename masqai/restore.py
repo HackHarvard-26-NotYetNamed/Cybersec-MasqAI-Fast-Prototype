@@ -206,6 +206,7 @@ class ArgumentStream:
         if self.total > MAX_ARGUMENT_CHARS:
             raise StreamLimitError(f"tool call arguments exceed {MAX_ARGUMENT_CHARS} characters")
         text = self.pending + delta
+        # Do not emit restored placeholders until the finish delta if network exfiltration is possible:
         cut = text.rfind("<")
         if cut != -1 and len(text) - cut <= MAX_PLACEHOLDER and PARTIAL_RE.match(text, cut):
             emit, self.pending = text[:cut], text[cut:]

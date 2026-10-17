@@ -12,7 +12,7 @@ import copy
 import json
 from typing import Any, Callable
 
-from .restore import AGENT_ANTHROPIC, ArgumentStream, StreamLimitError, restore_arguments, restore_responses_item, restore_value
+from .restore import AGENT_ANTHROPIC, ArgumentStream, StreamLimitError, restore_arguments, restore_responses_item, restore_text, restore_value
 
 # The upstream is untrusted: one SSE frame may not grow without bound.
 MAX_FRAME_BYTES = 8 * 1024 * 1024
@@ -104,7 +104,66 @@ class SSETransformer:
         before: list[bytes] = []
         for choice in value.get("choices") or []:
             ci = choice.get("index", 0)
+            if ci in self.blocked_choices:
+                value.clear()
+                return []
             delta = choice.get("delta") or {}
+            has_tool_delta = bool(delta.get("tool_calls") or delta.get("function_call"))
+
+            # If tool calls are present, buffer frames until the tool call finishes so we can inspect
+            if has_tool_delta or ci in self.held_frames:
+                self.held_frames.setdefault(ci, []).append(copy.deepcopy(value))
+                for call in delta.get("tool_calls") or []:
+                    fn = call.get("function") or {}
+                    call_idx = call.get("index", 0)
+                    if isinstance(fn.get("arguments"), str):
+                        self.stream(("chat", ci, call_idx)).feed(fn["arguments"])
+                if isinstance((delta.get("function_call") or {}).get("arguments"), str):
+                    self.stream(("chat-fc", ci)).feed(delta["function_call"]["arguments"])
+
+                if choice.get("finish_reason"):
+                    all_args = ""
+                    for key in [k for k in list(self.streams.keys()) if k[0] in {"chat", "chat-fc"} and k[1] == ci]:
+                        stream_obj = self.streams.pop(key, None)
+                        rest = stream_obj.flush() if stream_obj else ""
+                        all_args += rest
+
+                    has_secret = any(v in all_args for v in self.table.values() if v)
+                    is_net = any(x in all_args.lower() for x in (
+                        "http://", "https://", "ftp://", "ssh://", "curl", "wget", "fetch", "requests", "nc ", "netcat", "/dev/tcp", "socket", "git push"
+                    ))
+                    if has_secret and is_net:
+                        self.blocked_choices.add(ci)
+                        self.held_frames.pop(ci, None)
+                        notice = "> [MasqAI] Blocked streamed tool call: exfiltration attempt detected"
+                        block_msg = {k: v for k, v in value.items() if k not in {"choices", "usage"}}
+                        block_msg["choices"] = [{"index": ci, "delta": {"role": "assistant", "content": notice}, "finish_reason": "stop"}]
+                        value.clear()
+                        return [self.encode(block_msg)]
+
+                    # Safe: emit the frames normally with restore_arguments applied to full arguments
+                    frames = self.held_frames.pop(ci, [])
+                    out_bytes = []
+                    for f in frames:
+                        for ch in f.get("choices") or []:
+                            if ch.get("index") == ci:
+                                d = ch.get("delta") or {}
+                                for tc in d.get("tool_calls") or []:
+                                    fn = tc.get("function") or {}
+                                    if isinstance(fn.get("arguments"), str):
+                                        fn["arguments"] = ArgumentStream(self.table, True).feed(fn["arguments"])
+                                if isinstance((d.get("function_call") or {}).get("arguments"), str):
+                                    d["function_call"]["arguments"] = ArgumentStream(self.table, True).feed(d["function_call"]["arguments"])
+                        out_bytes.append(self.encode(f))
+                    if rest:
+                        flush = {k: v for k, v in value.items() if k not in {"choices", "usage"}}
+                        flush["choices"] = [{"index": ci, "delta": {"tool_calls": [{"index": 0, "function": {"arguments": rest}}]}, "finish_reason": None}]
+                        out_bytes.append(self.encode(flush))
+                    value.clear()
+                    return out_bytes
+                value.clear()
+                return []
+
             for call in delta.get("tool_calls") or []:
                 fn = call.get("function") or {}
                 if isinstance(fn.get("arguments"), str):
@@ -123,21 +182,8 @@ class SSETransformer:
                     else:
                         flush["choices"] = [{"index": ci, "delta": {"function_call": {"arguments": rest}}, "finish_reason": None}]
                     before.append(self.encode(flush))
-            # If the chunk contains restored values along with an exfiltration command, block it
-            if self.guardrail_check:
-                pass
-        # Check overall frame for exfiltration before emitting
-        raw_text = json.dumps(value, ensure_ascii=False)
-        is_net = any(x in raw_text.lower() for x in ("curl http", "curl -", "wget http", "wget -", "fetch(\"http", "requests.post", "requests.get"))
-        has_secret = any(v in raw_text for v in self.table.values() if v)
-        if is_net and has_secret:
-            for choice in value.get("choices") or []:
-                ci = choice.get("index", 0)
-                notice = "> [MasqAI] Blocked streamed tool call: exfiltration attempt detected"
-                block_msg = {k: v for k, v in value.items() if k not in {"choices", "usage"}}
-                block_msg["choices"] = [{"index": ci, "delta": {"role": "assistant", "content": notice}, "finish_reason": "stop"}]
-                value.clear()
-                return [self.encode(block_msg)]
+
+        return before
         return before
 
     # ---------- Anthropic Messages ----------

@@ -236,14 +236,15 @@ class Sanitizer:
         arg_str = json.dumps(arguments, ensure_ascii=False) if not isinstance(arguments, str) else arguments
         
         # High-precision network exfiltration heuristics:
-        # If the tool call has no network-like arguments (no URL schemes, IPs, or outbound CLI tools like curl/wget/fetch),
-        # allow purely local operations (e.g. read_file, sqlite3, local python script without urls).
+        # If the tool call has no network-like arguments (no URL schemes, IPs, outbound CLI tools like curl/wget/fetch,
+        # sockets, /dev/tcp, ssh, git push), allow purely local operations (e.g. read_file, sqlite3, local python script without urls).
         network_indicator = any(x in arg_str.lower() for x in (
             "http://", "https://", "ftp://", "ssh://", "ws://", "wss://",
-            "curl ", "wget ", "fetch(", "requests.", "urllib.", "http.client",
-            "nc ", "ncat ", "netcat ", "socat ", "nslookup ", "dig "
+            "curl", "wget", "fetch", "requests.", "urllib.", "http.client",
+            "nc ", "ncat ", "netcat ", "socat ", "nslookup ", "dig ",
+            "/dev/tcp", "/dev/udp", "socket.", "connect(", "sendto(", "git push", "ssh "
         ))
-        if not network_indicator and tool_name.lower() not in ("fetch", "http_request", "curl", "webhook"):
+        if not network_indicator and tool_name.lower() not in ("fetch", "http_request", "curl", "webhook", "netcat", "ssh"):
             return True, "local tool execution (no outbound network indicators)"
 
         security = self.config.security

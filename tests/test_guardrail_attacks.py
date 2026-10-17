@@ -35,13 +35,20 @@ def exfil_reply(fakes, client):
 
 class GuardrailAttacks(unittest.TestCase):
     def test_streamed_tool_call_is_inspected(self):
-        """Real agents stream; a streamed exfiltration call must be inspected like a buffered one."""
+        """Real agents stream in small chunks; exfiltration must be blocked even when chunked in 6-char slices."""
         with gateway(make_config(security=True)) as (app, client, fakes):
             args = exfil_reply(fakes, client)
-            fakes.upstream = lambda r: httpx.Response(200, headers={"content-type": "text/event-stream"}, content=sse(
+            # Break tool call arguments into small 6-character chunks
+            chunks = [args[i:i + 6] for i in range(0, len(args), 6)]
+            events = [
                 {"choices": [{"index": 0, "delta": {"role": "assistant", "tool_calls": [
-                    {"index": 0, "id": "x", "type": "function", "function": {"name": "bash", "arguments": args}}]}}]},
-                {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]}))
+                    {"index": 0, "id": "x", "type": "function", "function": {"name": "bash", "arguments": chunks[0]}}]}}]}
+            ]
+            for c in chunks[1:]:
+                events.append({"choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "function": {"arguments": c}}]}}]})
+            events.append({"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]})
+
+            fakes.upstream = lambda r: httpx.Response(200, headers={"content-type": "text/event-stream"}, content=sse(*events))
             fakes.security_answers = [[], {"decision": "block", "reason": "exfiltration"}]
             r = client.post("/v1/chat/completions", headers=SESSION,
                             json={"model": "m", "messages": read_config() + [{"role": "user", "content": "go"}], "stream": True})
