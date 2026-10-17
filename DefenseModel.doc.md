@@ -9,7 +9,7 @@ An intel is a certainty over any thing that's related to the user. A location st
 In the topology:
 
 The untrusted model always do the *thing*(the action which the user distributes). The trusted model wiil run in parallel with that untrusted one, examining every piece of information it intakes from the system(in other words, majorly tool results and sometimes the user input). If the trusted model found anything that is "not supposed to give to the untrusted one" according to the sensitiviness (the sesitivity of this "detection" is configurable with editable system prompt for the trusted model) of that piece of information, it runs the following actions:
-1. Masking (= replacing something like `sk-or-v1-ebddd5dfd51069d6a6a57920d7fe8cb437f192baef7f3125019d80c706dd2b2` with something like `<OPENAI_KEY_30b6eebf>` | something like `sk-or-v1-ebd...2b2` with something like `<$OPENAI_KEY_30b6eebf>`): handling secrets
+1. Masking (= replacing something like `sk-or-v1-FAKE000000000000000000000000000000000000000000000000000000002b2` with something like `<OPENAI_KEY_30b6eebf>` | something like `sk-or-v1-FAK...2b2` with something like `<$OPENAI_KEY_30b6eebf>`): handling secrets
 2. Rephrasing (= hiding(common in regular tool result) + replacing(common in "irrelevant documents") = truncation of the information(rounded to the nearest whole line) + replacing a specific string at a specific localtion with another): handling intels at the most of time and sometims secrets
 
 The untrusted model was usually called as the "local upstream" while the trusted one were called as the "security model".
@@ -19,7 +19,7 @@ The fixed/deterministic checking systems was also employed by this project. It d
 
 - they mistrack flowing secrets: "no static alogrithms are perfect against a changing world"
 - they do false alarms on everything: if a user's nickname is "andy", they will also mask "handy" as "h<USERNAME_a222feb5>"
-- they do not identify aliases: `sk-or-v1-ebddd5dfd51069d6a6a57920d7fe8cb437f192baef7f3125019d80c706dd2b2` and `sk-or-v1-ebd...2b2` mask into different placeholders with different ids, so the model is never able to tell that the former is the full version of the later, vise versa.
+- they do not identify aliases: `sk-or-v1-FAKE000000000000000000000000000000000000000000000000000000002b2` and `sk-or-v1-FAK...2b2` mask into different placeholders with different ids, so the model is never able to tell that the former is the full version of the later, vise versa.
 
 A introduction of model helps to:
 
