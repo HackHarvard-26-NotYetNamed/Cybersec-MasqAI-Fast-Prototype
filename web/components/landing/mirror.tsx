@@ -120,7 +120,7 @@ function Line({ children, active, dim }: { children: React.ReactNode; active?: b
   return (
     <p
       className={`rounded-md px-2 py-1 font-mono text-[15px] leading-relaxed whitespace-pre-wrap transition-colors [overflow-wrap:anywhere] ${
-        active ? "bg-accent" : ""
+        active ? "bg-foreground/5" : ""
       } ${dim ? "text-muted-foreground" : ""}`}
     >
       {children}
