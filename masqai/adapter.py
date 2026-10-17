@@ -101,8 +101,13 @@ class Extractor:
             if isinstance(message.get("refusal"), str):
                 self.add(path + ("refusal",), message["refusal"], role, "message")
             for j, call in enumerate(message.get("tool_calls") or []):
-                if isinstance(call, dict):
-                    self.args(path + ("tool_calls", j, "function", "arguments"), (call.get("function") or {}).get("arguments"))
+                if not isinstance(call, dict):
+                    continue
+                if call.get("type", "function") != "function":
+                    # e.g. a `custom` tool call: its free-form input is not a known leaf.
+                    self.unknown(path + ("tool_calls", j), call.get("type"), role)
+                    continue
+                self.args(path + ("tool_calls", j, "function", "arguments"), (call.get("function") or {}).get("arguments"))
             if isinstance(message.get("function_call"), dict):
                 self.args(path + ("function_call", "arguments"), message["function_call"].get("arguments"))
             for key in ("reasoning", "reasoning_content", "reasoning_details"):
@@ -277,10 +282,23 @@ class Extractor:
             self.passthrough(path, block, role)   # signed: forwarded untouched
         elif typ == "document":
             source = block.get("source") or {}
-            if source.get("type") == "text" and isinstance(source.get("data"), str):
+            stype = source.get("type") if isinstance(source, dict) else None
+            if stype == "text" and isinstance(source.get("data"), str):
                 self.add(path + ("source", "data"), source["data"], role, kind, mask_only=not inside_result)
+            elif stype == "content":
+                # Custom-content document: its own text/image blocks, read like a message's blocks.
+                content = source.get("content")
+                if isinstance(content, str):
+                    self.add(path + ("source", "content"), content, role, kind, mask_only=not inside_result)
+                elif isinstance(content, list):
+                    for k, inner in enumerate(content):
+                        self.anthropic_block(inner, path + ("source", "content", k), role, inside_result=inside_result)
+                else:
+                    self.unknown(path + ("source",), "content", role)
+            elif stype in {"base64", "url", "file"}:
+                self.opaque(path, f"document ({stype} source, {source.get('media_type', 'unknown type')})", role)
             else:
-                self.opaque(path, f"document ({source.get('type', '?')} source, {source.get('media_type', 'unknown type')})", role)
+                self.unknown(path + ("source",), stype, role)
             for key in ("title", "context"):
                 if isinstance(block.get(key), str):
                     self.add(path + (key,), block[key], role, kind)
@@ -301,14 +319,15 @@ def locate_path(path: tuple) -> str:
 
 def extract(payload: dict[str, Any], api: str, pass_unknown: bool = False) -> list[ContextItem]:
     """Content items of a request. Raises UnknownContent (→ 422) or BadRequest (→ 400)."""
-    extractor = Extractor(_api(api), pass_unknown)
-    getattr(extractor, extractor.api)(payload)
-    return extractor.items
+    return extract_with_warnings(payload, api, pass_unknown)[0]
 
 
 def extract_with_warnings(payload: dict[str, Any], api: str, pass_unknown: bool) -> tuple[list[ContextItem], list[dict[str, str]]]:
     extractor = Extractor(_api(api), pass_unknown)
     getattr(extractor, extractor.api)(payload)
+    if payload.get("prompt") is not None:
+        # Legacy completions text or a Responses prompt template (with variables): not a known leaf.
+        extractor.unknown(("prompt",), "prompt", "user")
     return extractor.items, extractor.warnings
 
 

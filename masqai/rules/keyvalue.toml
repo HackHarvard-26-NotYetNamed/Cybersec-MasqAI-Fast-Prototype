@@ -1,12 +1,25 @@
-# Generic key=value / key: value detector. A key whose last word is one of `names`, followed by `=` or
-# `:`, has its VALUE masked (never the key). DB_PASSWORD=..., "api_key": "...", token: ... all match;
-# max_tokens: 4096 does not (the key must end with the name).
+# Generic key=value / key: value detector. A key ending in one of `names`, followed by `=` or `:`, has its
+# VALUE masked (never the key). DB_PASSWORD=..., "api_key": "...", token: ... all match; max_tokens: 4096 does not.
+# Names of 5+ characters may be glued to a prefix (`dbpassword`, `csrftoken`); shorter ones (`pwd`, `auth`, `pass`)
+# only as a whole segment (`DB_PWD`), so `bypass` and `oauth` don't count.
+# Code, references and prose are skipped (detectors.keyvalue_rule): `password = getpass()`, `token = os.environ[...]`,
+# `secret = MY_SECRET_NAME`, `${TOKEN}`, `<your key here>`, `sk-...`, `"The token to use"`.
 
 names = [
-  "password", "passwd", "pwd", "pass", "secret", "token", "api_key", "apikey", "access_key",
-  "client_secret", "auth", "secret_key", "private_key", "access_token", "refresh_token",
-  "auth_token", "bearer", "credentials", "session_key",
+  "password", "passwd", "passphrase", "pwd", "pass",
+  "secret", "secret_key", "secretkey", "client_secret", "clientsecret", "app_secret", "shared_secret",
+  "token", "access_token", "accesstoken", "refresh_token", "refreshtoken", "auth_token", "authtoken", "id_token",
+  "bearer_token", "session_token", "api_token", "apitoken", "private_token", "bearer",
+  "api_key", "apikey", "api-key", "access_key", "accesskey", "secret_access_key", "private_key", "privatekey",
+  "auth", "credential", "credentials", "signing_key", "encryption_key", "master_key", "webhook_secret", "session_key",
+  "connection_string", "dsn",
 ]
-min_length = 6
+# Minimum value length; values mixing letters and digits may be shorter.
+min_length = 8
+min_length_mixed = 6
 # Values that are clearly not secrets.
-ignore_values = ["true", "false", "null", "none", "required", "optional", "string", "changeme_placeholder"]
+ignore_values = [
+  "true", "false", "null", "none", "nil", "undefined", "required", "optional", "string", "number", "boolean",
+  "object", "redacted", "masked", "hidden", "example", "placeholder", "your_token_here", "your-api-key",
+  "your_api_key", "changeit", "changeme_placeholder", "xxxxxxxx", "********",
+]

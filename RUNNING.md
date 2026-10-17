@@ -69,10 +69,48 @@ See [`masqai.json.example`](masqai.json.example). Unknown keys are rejected at l
   -package-version/-lang` (`-retry-count` and `-timeout` pass), client session ids (read locally as hints first),
   `x-forwarded-*`, `x-real-ip`, `forwarded`, `via`, `http-referer`, `x-title`. `user_agent` (default `masqai/0.2.0`)
   replaces the client's User-Agent; empty forwards the client's own.
-- **retention**: `idle_ttl_h` (12) and `max_sessions` (50, LRU). Busy sessions are never evicted.
+- **retention**: `idle_ttl_h` (12) and `max_sessions` (50, LRU). Busy sessions are never evicted, and Forget on a
+  busy session returns `409`.
 
 `user`, `metadata.user_id`, `safety_identifier` and `prompt_cache_key` are always replaced with a per-session
 pseudonym (`masq-` + 128 random bits). Other `metadata` keys pass.
+
+## Content types
+
+Extraction is strict per API. Anything not listed is unknown content: `422` before a session exists, unless
+`pass_unknown` (then forwarded raw with a warning).
+
+| API | Read and sanitized | Forwarded unread |
+|---|---|---|
+| Chat `/v1/chat/completions` | message content (string or `text` parts), `refusal`, `tool_calls[].function.arguments` (type `function` only), legacy `function_call.arguments`, tool descriptions | `reasoning*` fields |
+| Responses `/v1/responses` | `instructions`, `input`, `message` (`input_text`/`output_text`/`refusal`), `function_call(_output)`, `custom_tool_call(_output)`, `mcp_call`, `mcp_list_tools`, `mcp_approval_request/response`, `local_shell_call(_output)`, tool descriptions | `reasoning` (encrypted) |
+| Anthropic `/v1/messages` | `system`, `text` (and `cited_text`), `tool_result`, `tool_use`/`server_tool_use`/`mcp_tool_use` input, `mcp_tool_result`, `document` with a `text` or `content` source plus `title`/`context`, tool descriptions | `thinking`/`redacted_thinking` (signed); opaque: `image`, `document` with a `base64`/`url`/`file` source |
+
+Deliberately unknown (blocked by default): OpenAI `image_url`, `input_image`, `input_file`, `input_audio`; Chat tool
+calls whose `type` isn't `function`; Responses `computer_call(_output)`, `file_search_call`, `web_search_call`,
+`item_reference`; Anthropic `search_result`, `web_search_tool_result`, other `document` sources; a top-level `prompt`.
+
+## Detectors
+
+They run on every request, before the security model and also without it. They can't be prompt-injected, and with
+the security model off they are the only layer. Rules are data in [`masqai/rules`](masqai/rules):
+
+- **Patterns** (`patterns.toml`): PEM private keys (the whole block), JWTs, then prefix tokens (OpenRouter, Anthropic,
+  OpenAI, AWS `AKIA`/`ASIA`, Stripe, Google `AIza…`, Slack, GitHub, GitLab, npm, Hugging Face, PyPI, DigitalOcean,
+  Shopify, SendGrid). A token may not be glued to a word on the left (`task-force…` is not `sk-…`).
+- **Context rules** (only the value is masked): the AWS secret after `aws_secret_access_key`, `user:password` in
+  `scheme://user:password@host` (obvious examples like `user:pass` skipped), `AccountKey=`/`SharedAccessKey=`/
+  `SharedAccessSignature=`/`Password=`/`Pwd=` in connection strings (case-sensitive, so `password=password,` in Python
+  isn't one), and `Bearer` tokens.
+- **Generic key=value** (`keyvalue.toml`): a key ending in a secret-like name (`password`, `secret`, `token`, `api_key`,
+  `auth`, …) followed by `=` or `:`. Names under 5 characters only as a whole segment (`DB_PWD`, not `bypass`). Quoted,
+  JSON-escaped and bare values. Code and templates are skipped: `getpass()`, `os.environ[…]`, `MY_SECRET_NAME`,
+  `${TOKEN}`, `<your key here>`, `sk-...`, `"The token to use"`, `login(password=password1)`.
+- E-mail addresses.
+
+Hits are checked most specific first; a hit overlapping an earlier one is dropped (`postgres://bob:pw@db.example.com`
+gives the credentials, not also an e-mail). `email` and the generic rule always run last. Every hit becomes an
+entity, and its exact copies are masked everywhere automatically (at word boundaries).
 
 ## The GUI
 

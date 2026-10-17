@@ -200,6 +200,58 @@ class Detectors(unittest.TestCase):
         self.assertEqual(email.detected_in, {items[0].id})
         self.assertEqual(session.entity_for("andy").origin, "detector:custom")
 
+    # (type, text, secret). Synthetic values only.
+    POSITIVE = [
+        ("AWS_SECRET", '"AWS_SECRET_ACCESS_KEY": "FAKErXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEZ"', "FAKErXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEZ"),
+        ("AWS_SECRET", '{\\"aws_secret_access_key\\": \\"FAKErXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\\"}', "FAKErXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"),
+        ("STRIPE_KEY", "whsec_FAKEQ9r8GKYqrTwjUPD8ILPZIRsKKAAAA", "whsec_FAKEQ9r8GKYqrTwjUPD8ILPZIRsKKAAAA"),
+        ("GOOGLE_KEY", "key=AIzaFAKEI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&x", "AIzaFAKEI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI"),
+        ("SLACK_WEBHOOK", "post to https://hooks.slack.com/services/T0000/B0000/FAKEFAKEFAKE now",
+         "https://hooks.slack.com/services/T0000/B0000/FAKEFAKEFAKE"),
+        ("NPM_TOKEN", "//registry.npmjs.org/:_authToken=npm_" + "F" * 36, "npm_" + "F" * 36),
+        ("SECRET", "DB_PASSWORD=FAKEhunter22", "FAKEhunter22"),
+        ("SECRET", 'password: "c0rrect FAKE horse"', "c0rrect FAKE horse"),
+        ("SECRET", "api_key='FAKE1234efgh'", "FAKE1234efgh"),
+        ("SECRET", '{"client_secret": "Tr0ub4dor&FAKE"}', "Tr0ub4dor&FAKE"),
+        ("SECRET", '{\\"passwd\\": \\"Tr0ub4dor&3FAKE\\"}', "Tr0ub4dor&3FAKE"),      # JSON inside a JSON string
+        ("SECRET", "export GITHUB_TOKEN=s3cr3tFAKE99", "s3cr3tFAKE99"),
+        ("SECRET", "  password: s3cretFAKE", "s3cretFAKE"),                              # YAML
+        ("CREDENTIAL", "postgres://bob:s3cretFAKE@db.example.com:5432/app", "bob:s3cretFAKE"),
+        ("CREDENTIAL", "Server=tcp:x;User Id=sa;Password=P@ssw0rdFAKE!;", "P@ssw0rdFAKE!"),
+        ("CREDENTIAL", "Endpoint=sb://x/;SharedAccessKeyName=k;SharedAccessKey=FAKEabc123456=", "FAKEabc123456="),
+        ("BEARER_TOKEN", "Authorization: Bearer FAKEdefghijklmnop1234", "FAKEdefghijklmnop1234"),
+    ]
+
+    # Code, templates, references and prose: no hit except e-mail addresses.
+    NEGATIVE = [
+        'token = os.environ["TOKEN"]', "password = getpass()", "secret = MY_SECRET_NAME", "self.token = token",
+        '"description": "The token to use for requests"', "password: str", "api_key=${OPENAI_API_KEY}",
+        "token=<SECRET_1a2b3c4d>", "bypass=enabled_mode", "oauth=something12345", "max_tokens: 4096",
+        'if password == "hunter22":', "password=********", "auth: required", "token: ${{ secrets.GITHUB_TOKEN }}",
+        "task-force-alpha-bravo-charlie", "url = https://user:pass@example.com", "def login(password=password1):",
+        "auth: AuthTypes", 'api_key = "sk-..."', "apikey: <your key here>", "password=password,",
+        "ssh://git@github.com/x", "https://example.com/a:b@c",
+    ]
+
+    def test_positive_samples_mask_only_the_value(self):
+        for type_, text, secret in self.POSITIVE:
+            self.assertIn((type_, secret), self.found(text), text)
+
+    def test_code_templates_and_prose_are_not_secrets(self):
+        for text in self.NEGATIVE:
+            self.assertEqual({f for f in self.found(text) if f[0] != "EMAIL"}, set(), text)
+
+    def test_overlapping_hits_keep_the_most_specific(self):
+        rules = load_rules()
+        url = scan("postgres://bob:s3cretFAKE@db.example.com/x", rules)
+        self.assertEqual([(f.type, f.value) for f in url], [("CREDENTIAL", "bob:s3cretFAKE")])
+        key = scan('api_key="sk-proj-FAKEFAKEabcdefghijklmnop"', rules)
+        self.assertEqual([(f.type, f.value) for f in key], [("OPENAI_KEY", "sk-proj-FAKEFAKEabcdefghijklmnop")])
+
+    def test_generic_and_email_rules_run_last(self):
+        names = [r.name for r in load_rules()]
+        self.assertEqual(names[-2:], ["email", "generic_key_value"])
+
 
 class Config(unittest.TestCase):
     def test_defaults(self):

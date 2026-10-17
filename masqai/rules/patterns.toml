@@ -1,33 +1,17 @@
 # Deterministic detector rules. Detectors only ever MASK; they never rephrase.
 #
 # Each [[rule]]:
-#   name   reported as the detector that matched (shown in traces and the replay export)
-#   type   placeholder label: <TYPE_xxxxxxxx>
-#   regex  Python regular expression
-#   group  optional: mask only this capture group (e.g. the value of a key=value pair)
+#   name    reported as the detector that matched (shown in traces and the replay export)
+#   type    placeholder label: <TYPE_xxxxxxxx>
+#   regex   Python regular expression
+#   group   optional: mask only this capture group (e.g. the value of a key=value pair). Such a value is
+#           skipped when it is a template or reference (`${X}`, `<your key>`, `sk-...`)
+#   ignore  optional, with group: regexes; a value fully matching one is not a secret
 #
-# Order matters: when two rules match the same text, the first one names it.
+# Order matters: when two hits overlap, the first rule's hit is kept and names it. `email` and the generic
+# key=value rule (keyvalue.toml) always run last.
+# Token rules may not be glued to a word on the left (`task-force…` is not `sk-…`) or continue on the right.
 # A gitleaks import is not wired yet (see detectors.import_gitleaks); decide from measured false positives.
-
-[[rule]]
-name = "openrouter_key"
-type = "OR_KEY"
-regex = 'sk-or-v1-[A-Za-z0-9]{20,}'
-
-[[rule]]
-name = "anthropic_key"
-type = "ANTHROPIC_KEY"
-regex = 'sk-ant-[A-Za-z0-9_-]{20,}'
-
-[[rule]]
-name = "openai_key"
-type = "OPENAI_KEY"
-regex = 'sk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_-]{20,}'
-
-[[rule]]
-name = "jwt"
-type = "JWT"
-regex = 'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}'
 
 # The whole PEM block: header, body and footer. Without a footer (truncated output), the header plus
 # the base64 lines after it. `\\n` covers a key inside JSON text.
@@ -37,41 +21,56 @@ type = "PRIVATE_KEY"
 regex = '-----BEGIN (?P<kind>[A-Z0-9 ]*)PRIVATE KEY( BLOCK)?-----(?:[\s\S]*?-----END (?P=kind)PRIVATE KEY( BLOCK)?-----|(?:[\r\n]|\\[rn]|[A-Za-z0-9+/=])*)'
 
 [[rule]]
-name = "email"
-type = "EMAIL"
-regex = '(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}(?![A-Za-z0-9-])'
+name = "jwt"
+type = "JWT"
+regex = '(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}'
+
+[[rule]]
+name = "openrouter_key"
+type = "OR_KEY"
+regex = '(?<![A-Za-z0-9_-])sk-or-v1-[A-Za-z0-9]{20,}(?![A-Za-z0-9])'
+
+[[rule]]
+name = "anthropic_key"
+type = "ANTHROPIC_KEY"
+regex = '(?<![A-Za-z0-9_-])sk-ant-[A-Za-z0-9_-]{20,}'
+
+[[rule]]
+name = "openai_key"
+type = "OPENAI_KEY"
+regex = '(?<![A-Za-z0-9_-])sk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_-]{20,}'
 
 [[rule]]
 name = "aws_access_key_id"
 type = "AWS_KEY"
-regex = '(?:AKIA|ASIA)[0-9A-Z]{16}(?![0-9A-Z])'
+regex = '(?<![A-Za-z0-9_])(?:AKIA|ASIA)[0-9A-Z]{16}(?![0-9A-Z])'
 
 # 40-character AWS secret keys look like any base64 string, so only in key=value context.
 [[rule]]
 name = "aws_secret_access_key"
 type = "AWS_SECRET"
-regex = '''(?i)aws_?secret_?access_?key["']?\s*[:=]\s*["']?([A-Za-z0-9/+=]{40})(?![A-Za-z0-9/+=])'''
+regex = '''(?i)aws_?secret_?access_?key\\?["']?\s*[:=]\s*\\?["']?([A-Za-z0-9/+=]{40})(?![A-Za-z0-9/+=])'''
 group = 1
 
 [[rule]]
 name = "stripe_key"
 type = "STRIPE_KEY"
-regex = '(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}'
+regex = '(?<![A-Za-z0-9_])(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}'
 
 [[rule]]
 name = "stripe_webhook_secret"
 type = "STRIPE_KEY"
-regex = 'whsec_[A-Za-z0-9]{16,}'
+regex = '(?<![A-Za-z0-9_])whsec_[A-Za-z0-9+/=]{16,}'
 
 [[rule]]
 name = "google_api_key"
 type = "GOOGLE_KEY"
-regex = 'AIza[0-9A-Za-z_-]{35}'
+regex = '(?<![A-Za-z0-9_])AIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])'
 
 [[rule]]
 name = "slack_token"
 type = "SLACK_TOKEN"
-regex = 'xox[abposr]-[A-Za-z0-9-]{10,}'
+regex = '(?<![A-Za-z0-9_])xox[abposr]-[A-Za-z0-9-]{10,}'
 
 [[rule]]
 name = "slack_webhook"
@@ -81,53 +80,67 @@ regex = 'https://hooks\.slack\.com/services/[A-Za-z0-9/_-]+'
 [[rule]]
 name = "github_token"
 type = "GITHUB_TOKEN"
-regex = '(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})'
+regex = '(?<![A-Za-z0-9_])(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})'
 
 [[rule]]
 name = "gitlab_token"
 type = "GITLAB_TOKEN"
-regex = 'glpat-[A-Za-z0-9_-]{20,}'
+regex = '(?<![A-Za-z0-9_])glpat-[A-Za-z0-9_-]{20,}'
 
 [[rule]]
 name = "npm_token"
 type = "NPM_TOKEN"
-regex = 'npm_[A-Za-z0-9]{36}'
+regex = '(?<![A-Za-z0-9_])npm_[A-Za-z0-9]{36}(?![A-Za-z0-9])'
 
 [[rule]]
 name = "huggingface_token"
 type = "HF_TOKEN"
-regex = 'hf_[A-Za-z0-9]{30,}'
+regex = '(?<![A-Za-z0-9_])hf_[A-Za-z0-9]{30,}'
 
 [[rule]]
 name = "pypi_token"
 type = "PYPI_TOKEN"
-regex = 'pypi-AgEI[A-Za-z0-9_-]{50,}'
+regex = '(?<![A-Za-z0-9_])pypi-AgEI[A-Za-z0-9_-]{50,}'
 
 [[rule]]
 name = "digitalocean_token"
 type = "DO_TOKEN"
-regex = 'dop_v1_[a-f0-9]{64}'
+regex = '(?<![A-Za-z0-9_])do[por]_v1_[a-f0-9]{64}(?![a-f0-9])'
 
 [[rule]]
 name = "shopify_token"
 type = "SHOPIFY_TOKEN"
-regex = 'shpat_[a-fA-F0-9]{32}'
+regex = '(?<![A-Za-z0-9_])shp(?:at|ss|ca|pa)_[a-fA-F0-9]{32}(?![a-fA-F0-9])'
 
 [[rule]]
 name = "sendgrid_key"
 type = "SENDGRID_KEY"
-regex = 'SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}'
+regex = '(?<![A-Za-z0-9_])SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}'
 
 # Credentials inside a URL (scheme, then user and password before the @): only that user/password part.
+# Obvious examples (`user:pass`, `foo:bar`, `x:****`) are not secrets.
 [[rule]]
 name = "url_credentials"
 type = "CREDENTIAL"
-regex = '''(?i)\b[a-z][a-z0-9+.-]*://([^\s/:@'"<>]+:[^\s/@'"<>]+)@'''
+regex = '''\b[a-z][a-z0-9+.-]*://([^\s:/@'"<>{}]+:[^\s/@'"<>{}]+)@[A-Za-z0-9.-]'''
 group = 1
+ignore = ['[^:]*:(?:pass|password|passwd|pwd|pw|secret|bar|x+|\*+|changeme)']
 
-# ADO / Azure style connection strings: only the value.
+# ADO / Azure style connection strings: only the value. Case-sensitive on purpose: `password=password,`
+# is a Python keyword argument, `Password=…;` a connection string.
 [[rule]]
 name = "connection_string_secret"
 type = "CREDENTIAL"
-regex = '''(?i)(?<![A-Za-z0-9])(?:AccountKey|Password|Pwd|SharedAccessSignature)=([^;\s"'<>]+)'''
+regex = '''(?m)(?:^|[;\s"'])(?:AccountKey|SharedAccessKey|SharedAccessSignature|Password|PWD|Pwd)=([^;"'\s(){}\[\],]{6,})(?=;|"|'|\s|$)'''
 group = 1
+
+[[rule]]
+name = "bearer_token"
+type = "BEARER_TOKEN"
+regex = '\bBearer\s+([A-Za-z0-9._~+/-]{16,}=*)'
+group = 1
+
+[[rule]]
+name = "email"
+type = "EMAIL"
+regex = '(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}(?![A-Za-z0-9-])'

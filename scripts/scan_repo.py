@@ -42,10 +42,10 @@ def main() -> int:
         except (UnicodeDecodeError, OSError):
             continue
         for rule in rules:
-            for match in rule.pattern.finditer(text):
-                value = match.group(rule.group)
+            for start, end in rule.hits(text):
+                value = text[start:end]
                 if value and not synthetic(value):
-                    line = text.count("\n", 0, match.start()) + 1
+                    line = text.count("\n", 0, start) + 1
                     findings.append(f"{name}:{line}: {rule.name} ({len(value)} chars)")
     for finding in findings:
         print(finding)

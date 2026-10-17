@@ -83,6 +83,43 @@ class Extraction(unittest.TestCase):
             client.post("/v1/messages/count_tokens", json={"model": "m", "messages": [{"role": "user", "content": EMAIL}]})
             self.assertNotIn(EMAIL, json.dumps(fakes.upstream_json()))
 
+    def test_raw_paths_are_unknown_content(self):
+        """Fields that used to be forwarded unread: a top-level prompt, a non-function Chat tool call,
+        and an Anthropic document whose source type isn't known."""
+        cases = [
+            ("/v1/chat/completions", chat({"role": "user", "content": "hi"}, prompt=f"mail {EMAIL}"), "prompt", "prompt"),
+            ("/v1/responses", {"model": "m", "input": "hi", "prompt": {"id": "pmpt_1", "variables": {"who": EMAIL}}}, "prompt", "prompt"),
+            ("/v1/chat/completions", chat({"role": "assistant", "content": None, "tool_calls": [
+                {"id": "c1", "type": "custom", "custom": {"name": "shell", "input": f"mail {EMAIL}"}}]}),
+             "messages[0].tool_calls[0]", "custom"),
+            ("/v1/messages", {"model": "m", "messages": [{"role": "user", "content": [
+                {"type": "document", "source": {"type": "mystery", "data": EMAIL}}]}]},
+             "messages[0].content[0].source", "mystery"),
+        ]
+        with gateway() as (app, client, fakes):
+            for path, body, location, content_type in cases:
+                r = client.post(path, json=body)
+                self.assertEqual(r.status_code, 422, location)
+                err = r.json()["error"]
+                self.assertEqual((err["location"], err["content_type"]), (location, content_type))
+                self.assertNotIn(EMAIL, r.text)
+            self.assertEqual(fakes.upstream_calls, [])
+
+    def test_anthropic_content_document_is_read(self):
+        with gateway() as (app, client, fakes):
+            body = {"model": "m", "messages": [{"role": "user", "content": [
+                {"type": "document", "title": "notes", "source": {"type": "content", "content": [
+                    {"type": "text", "text": f"owner {EMAIL}"},
+                    {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "AAAA"}}]}},
+                {"type": "document", "source": {"type": "file", "file_id": "file_1"}}]}]}
+            self.assertEqual(client.post("/v1/messages", json=body).status_code, 200)
+            sent = fakes.upstream_json()["messages"][0]["content"]
+            inner = sent[0]["source"]["content"]
+            self.assertRegex(inner[0]["text"], r"owner <EMAIL_[0-9a-f]{8}>")
+            self.assertEqual(inner[1]["source"]["data"], "AAAA")
+            self.assertEqual(sent[1]["source"], {"type": "file", "file_id": "file_1"})   # opaque, forwarded unread
+            self.assertNotIn(EMAIL, json.dumps(sent))
+
 
 class Endpoints(unittest.TestCase):
     def test_unsupported_endpoints_send_nothing(self):
@@ -309,11 +346,17 @@ class Sessions(unittest.TestCase):
             busy.last_seen -= 7200
             store.enforce(1, 2)
             self.assertIn(busy.id, store.sessions)          # never evicted while busy
-            busy.in_flight = 0
             sid = busy.id
+            self.assertTrue(any(t["session_id"] == sid for t in app.state.traces.as_list()))
+            # Nor forgotten by hand: a running stream still needs the mapping to restore tool calls.
+            self.assertEqual(api(client, "POST", f"/api/sessions/{sid}/forget").status_code, 409)
+            self.assertIn(sid, store.sessions)
+            busy.in_flight = 0
             self.assertEqual(api(client, "POST", f"/api/sessions/{sid}/forget").status_code, 200)
             self.assertNotIn(sid, store.sessions)
+            self.assertFalse(any(t["session_id"] == sid for t in app.state.traces.as_list()))
             self.assertTrue(any(e["type"] == "forget" and e["session"] == sid for e in events))
+            self.assertEqual(api(client, "POST", f"/api/sessions/{sid}/forget").status_code, 404)
 
 
 class Hygiene(unittest.TestCase):

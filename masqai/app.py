@@ -172,8 +172,14 @@ def create_app(config: GatewayConfig, *, admin_token: str | None = None, playgro
 
     @app.post("/api/sessions/{sid}/forget")
     async def forget_session(sid: str):
-        if not forget(sid, "user"):
+        session = store.sessions.get(sid)
+        if session is None:
             return JSONResponse({"error": "unknown session"}, status_code=404)
+        if session.in_flight:
+            # Forgetting now would drop the mapping a running stream still needs to restore tool calls.
+            return JSONResponse({"error": "session is busy (a request or stream is in flight); try again when it ends"},
+                                status_code=409)
+        forget(sid, "user")
         return {"forgotten": sid}
 
     @app.get("/api/sessions/{sid}/replay")

