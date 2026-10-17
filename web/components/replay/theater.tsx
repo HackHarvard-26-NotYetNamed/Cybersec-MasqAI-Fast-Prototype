@@ -28,6 +28,12 @@ const ucLabel = (id: string) => id.match(/^uc(\d+)/i)?.[0].toUpperCase() ?? id;
 export function ReplayTheater() {
   const index = useJson("/data/replays/index.json", ReplayIndexSchema);
   const [picked, setPicked] = useState(() => (typeof window === "undefined" ? "" : window.location.hash.slice(1)));
+  // Follow the URL hash too (back button, edited URL, links to #uc…).
+  useEffect(() => {
+    const onHash = () => setPicked(window.location.hash.slice(1));
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
 
   if (index.status === "loading") return <Loading label="Loading replays" />;
   if (index.status === "error") return <DataError url={index.url} message={index.message} />;
