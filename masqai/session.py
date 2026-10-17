@@ -1,65 +1,103 @@
+"""Sessions: which stored conversation a request continues.
+
+There is no standard session id, and agents resend the whole history, compact it and branch it.
+- Hard hint: only the `x-masqai-session` header.
+- Otherwise prefix matching: the request continues the stored history it shares the longest prefix with
+  (leading system/developer messages don't count as evidence). Soft hints (`user`, `metadata.*`,
+  `prompt_cache_key`, client session-id headers) only choose BETWEEN sessions whose prefix matches equally.
+- A request that diverges from the stored history at index k is a rollback: the session keeps its
+  mapping, and its item list is replaced from k on.
+- Retention: idle TTL and an LRU cap, enforced periodically. A session with a request in flight or an
+  open stream is never evicted; the next-oldest goes instead.
+"""
 from __future__ import annotations
 
 import copy
 import secrets
+import time
+from typing import Any
 
 from .model import Session
 
+HARD_HINT = "x-masqai-session"
+SOFT_HEADER_HINTS = ("x-session-id", "session-id", "x-conversation-id", "conversation-id", "x-request-id")
+
 
 class SessionStore:
-    def __init__(self):
-        self.sessions = {}
-        self.histories = {}
-        self.hints = {}
+    def __init__(self) -> None:
+        self.sessions: dict[str, Session] = {}
+        self.histories: dict[str, list] = {}
+        self.hard: dict[str, str] = {}             # x-masqai-session value -> session id
+        self.soft: dict[str, set[str]] = {}         # session id -> soft hints seen
 
     @staticmethod
-    def history(payload):
-        return copy.deepcopy(payload.get("messages", payload.get("input", [])))
+    def history(payload: dict[str, Any]) -> list:
+        value = payload.get("messages", payload.get("input", []))
+        return copy.deepcopy(value) if isinstance(value, list) else [value]
 
-    def resolve(self, payload, headers):
-        """Hints first, then history prefix (design Q&A: "Hybrid: hints, then prefix").
+    @staticmethod
+    def soft_hints(payload: dict[str, Any], headers: dict[str, str]) -> set[str]:
+        """Read from the ORIGINAL payload, before pseudonymization."""
+        hints = {f"header:{k}:{headers[k]}" for k in SOFT_HEADER_HINTS if headers.get(k)}
+        metadata = payload.get("metadata")
+        if isinstance(metadata, dict):
+            hints |= {f"metadata:{k}:{v}" for k, v in metadata.items() if isinstance(v, (str, int)) and v != ""}
+        for key in ("user", "prompt_cache_key", "safety_identifier"):
+            if isinstance(payload.get(key), str) and payload[key]:
+                hints.add(f"{key}:{payload[key]}")
+        return hints
 
-        Without a hint, the request continues the stored history it shares the longest prefix
-        with. If it diverges at index k (compaction, edited or retried turn), the session is
-        rolled back: items after k are replaced by the new request's items. Leading
-        system/developer messages are identical across sessions of the same agent, so they do
-        not count as evidence; at least one conversational message must match.
-        """
-        hint = self._hint(payload, headers)
-        if hint and hint in self.hints:
-            return self.sessions[self.hints[hint]]
+    def resolve(self, payload: dict[str, Any], headers: dict[str, str]) -> Session:
+        hint = headers.get(HARD_HINT)
+        soft = self.soft_hints(payload, headers)
         history = self.history(payload)
-        best, score, ambiguous = None, 0, False
-        if isinstance(history, list):
-            for sid, previous in self.histories.items():
-                if not isinstance(previous, list):
-                    continue
-                common = self._evidence(history, previous)
-                if common > score:
-                    best, score, ambiguous = sid, common, False
-                elif common and common == score:
-                    ambiguous = True
-        if best and not ambiguous and not hint:
-            return self.sessions[best]
-        sid = "session-" + secrets.token_hex(8)
-        session = Session(sid, hint=hint)
-        if best:
-            # A new branch (hinted or ambiguous) keeps the parent's mapping and operations so the same
-            # value gets the same placeholder and shared history is sanitized the same way.
-            parent = self.sessions[best]
-            session.entities = copy.deepcopy(parent.entities)
-            session.ops = copy.deepcopy(parent.ops)
-            session.vetoes = copy.deepcopy(parent.vetoes)
-            session.inspected = set(parent.inspected)
-            session.parent_id = best
-        self.sessions[sid] = session
         if hint:
-            self.hints[hint] = sid
+            sid = self.hard.get(hint)
+            if sid in self.sessions:
+                session = self.sessions[sid]
+                self.soft.setdefault(sid, set()).update(soft)
+                return session
+            session = self._new(hint=hint)
+            self.hard[hint] = session.id
+            self.soft[session.id] = set(soft)
+            return session
+        scored = [(self._evidence(history, previous), sid) for sid, previous in self.histories.items() if sid in self.sessions]
+        best = max((score for score, _ in scored), default=0)
+        candidates = [sid for score, sid in scored if score == best and score > 0]
+        if len(candidates) > 1 and soft:
+            narrowed = [sid for sid in candidates if self.soft.get(sid, set()) & soft]
+            if narrowed:
+                candidates = narrowed
+        if len(candidates) == 1:
+            self.soft.setdefault(candidates[0], set()).update(soft)
+            return self.sessions[candidates[0]]
+        session = self._new()
+        if candidates:
+            # Still ambiguous: a new branch that keeps the most recent candidate's mapping, so the same
+            # value keeps the same placeholder and shared history is sanitized the same way.
+            self._inherit(session, max((self.sessions[s] for s in candidates), key=lambda s: s.last_seen))
+        self.soft[session.id] = set(soft)
+        return session
+
+    def _new(self, hint: str | None = None) -> Session:
+        session = Session("session-" + secrets.token_hex(8), hint=hint)
+        self.sessions[session.id] = session
         return session
 
     @staticmethod
+    def _inherit(child: Session, parent: Session) -> None:
+        child.entities = copy.deepcopy(parent.entities)
+        child.ops = copy.deepcopy(parent.ops)
+        child.vetoes = copy.deepcopy(parent.vetoes)
+        child.veto_reasons = dict(parent.veto_reasons)
+        child.inspected = set(parent.inspected)
+        child.rejected = copy.deepcopy(parent.rejected)
+        child.pseudonym = parent.pseudonym
+        child.parent_id = parent.id
+
+    @staticmethod
     def _evidence(history: list, previous: list) -> int:
-        """Number of shared leading messages that are not system/developer messages."""
+        """Shared leading messages that are not system/developer messages."""
         evidence = 0
         for a, b in zip(history, previous):
             if a != b:
@@ -68,10 +106,10 @@ class SessionStore:
                 evidence += 1
         return evidence
 
-    def remember(self, session, payload):
+    def remember(self, session: Session, payload: dict[str, Any]) -> None:
         history = self.history(payload)
         previous = self.histories.get(session.id)
-        if isinstance(previous, list) and isinstance(history, list):
+        if isinstance(previous, list):
             shared = 0
             for a, b in zip(history, previous):
                 if a != b:
@@ -80,17 +118,28 @@ class SessionStore:
             if shared < len(previous):
                 session.rollbacks += 1
         self.histories[session.id] = history
+        session.last_seen = time.time()
 
-    @staticmethod
-    def _hint(payload, headers):
-        for key in ("x-session-id", "session-id", "session_id", "x-conversation-id", "conversation-id"):
-            if headers.get(key):
-                return f"header:{key}:{headers[key]}"
-        metadata = payload.get("metadata") or {}
-        for key in ("session_id", "conversation_id", "user_id"):
-            if metadata.get(key):
-                return f"metadata:{key}:{metadata[key]}"
-        for key in ("prompt_cache_key", "user"):
-            if payload.get(key):
-                return f"{key}:{payload[key]}"
-        return None
+    # ---------- retention ----------
+    def enforce(self, idle_ttl_h: float, max_sessions: int, now: float | None = None) -> list[str]:
+        """Drop idle sessions, then the least recently used past the cap. Busy sessions are kept."""
+        now = time.time() if now is None else now
+        evicted = [sid for sid, s in self.sessions.items() if s.in_flight == 0 and now - s.last_seen > idle_ttl_h * 3600]
+        for sid in evicted:
+            self.forget(sid)
+        idle = sorted((s for s in self.sessions.values() if s.in_flight == 0), key=lambda s: s.last_seen)
+        while len(self.sessions) > max_sessions and idle:
+            victim = idle.pop(0)
+            self.forget(victim.id)
+            evicted.append(victim.id)
+        return evicted
+
+    def forget(self, sid: str) -> bool:
+        if sid not in self.sessions:
+            return False
+        del self.sessions[sid]
+        self.histories.pop(sid, None)
+        self.soft.pop(sid, None)
+        for hint in [h for h, s in self.hard.items() if s == sid]:
+            del self.hard[hint]
+        return True

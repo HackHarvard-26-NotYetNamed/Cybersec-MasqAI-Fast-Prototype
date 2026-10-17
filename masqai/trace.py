@@ -74,3 +74,9 @@ class TraceLog:
 
     def as_list(self) -> list[dict[str, Any]]:
         return [trace.as_dict() for trace in self.traces]
+
+    def forget(self, session_id: str) -> None:
+        """Drop a forgotten session's traces (they hold raw context)."""
+        kept = [t for t in self.traces if t.data["session_id"] != session_id]
+        self.traces.clear()
+        self.traces.extend(kept)

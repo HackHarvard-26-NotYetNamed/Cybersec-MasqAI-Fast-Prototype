@@ -42,6 +42,8 @@ def headers_for(provider: ProviderConfig, incoming: dict[str, str], policy: Head
     connection = next((v for k, v in incoming.items() if k.lower() == "connection"), "")
     hop_by_hop = {part.strip().lower() for part in connection.split(",") if part.strip()}
     result = {key: value for key, value in incoming.items() if key.lower() not in hop_by_hop and policy.allows(key)}
+    if policy.user_agent:
+        result["user-agent"] = policy.user_agent   # the client's own User-Agent identifies the agent and OS
     key = provider.resolved_key()
     if provider.format == "anthropic":
         if key:

@@ -2,41 +2,29 @@
   "host": "127.0.0.1",
   "port": 8787,
   "providers": [
-    {
-      "name": "openrouter",
-      "base_url": "https://openrouter.ai/api",
-      "api_key_env": "OPENROUTER_API_KEY",
-      "format": "openai"
-    },
-    {
-      "name": "security-local",
-      "base_url": "http://127.0.0.1:11434",
-      "format": "openai"
-    }
+    {"name": "openrouter", "base_url": "https://openrouter.ai/api", "api_key_env": "OPENROUTER_API_KEY", "format": "openai"},
+    {"name": "security-local", "base_url": "http://127.0.0.1:11434", "format": "openai"}
   ],
   "routes": {
-    "anthropic/claude-sonnet": {"provider": "openrouter", "model": "anthropic/claude-sonnet-4"},
-    "openai/gpt-4o": {"provider": "openrouter", "model": "openai/gpt-4o"}
+    "anthropic/claude-sonnet": {"provider": "openrouter", "model": "anthropic/claude-sonnet-4"}
   },
   "default_route": {"provider": "openrouter"},
+  "pass_unknown": false,
   "security": {
     "enabled": true,
     "provider": "security-local",
     "model": "qwen2.5:7b",
     "api_format": "openai",
+    "allow_remote_security_model": false,
+    "system_prompt": "",
     "context_mode": "recent",
     "recent_items": 12,
     "nearest_ops": -1,
     "op_context_lines": 2,
-    "auto_mask": "auto"
+    "auto_mask": "auto_veto",
+    "timeout_s": 60
   },
-  "detectors": {
-    "detect_host_identifiers": true,
-    "custom_values": []
-  },
-  "headers": {
-    "mode": "blocklist",
-    "blocklist": ["api-key", "x-goog-api-key", "cookie"],
-    "allowlist": ["accept", "content-type", "user-agent", "openai-beta", "openai-organization", "openai-project", "anthropic-beta", "anthropic-version", "http-referer", "x-title", "x-stainless-*"]
-  }
+  "detectors": {"detect_host_identifiers": true, "custom_values": [], "rules_dir": "masqai/rules"},
+  "headers": {"mode": "blocklist", "user_agent": "masqai/0.2.0"},
+  "retention": {"idle_ttl_h": 12, "max_sessions": 50}
 }
