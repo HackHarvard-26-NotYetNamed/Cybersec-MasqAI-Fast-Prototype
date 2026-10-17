@@ -4,12 +4,14 @@ import {
   Ban,
   Binary,
   BrainCircuit,
+  Copy,
   Fingerprint,
   FolderTree,
   KeyRound,
   RotateCcw,
   ScanSearch,
   ShieldCheck,
+  Telescope,
   UserRound,
 } from "lucide-react";
 import { MirrorHero } from "@/components/landing/mirror";
@@ -20,14 +22,15 @@ export default function Home() {
       <section className="bg-grid border-b">
         <div className="mx-auto max-w-7xl px-4 pt-12 pb-14 sm:px-6 sm:pt-16">
           <p className="font-mono text-sm tracking-wide text-muted-foreground uppercase">
-            Local context firewall for AI coding agents
+            Local context firewall for AI agents
           </p>
           <h1 className="mt-3 max-w-4xl text-4xl font-semibold tracking-tight text-balance sm:text-6xl">
             Your LLM key is a two-way mirror. <span className="text-restored">MasqAI makes it one-way.</span>
           </h1>
           <p className="mt-5 max-w-2xl text-lg text-pretty text-muted-foreground">
-            MasqAI runs on your own machine, between your agent and an LLM endpoint you don’t trust. Secrets are
-            masked before they leave, and swapped back in locally when the model asks to use them.
+            MasqAI runs on your own machine. A trusted security model inspects every request inline, before anything
+            reaches the untrusted model: secrets are masked, intel is hidden or replaced, and real values are swapped
+            back in locally when a tool call needs them.
           </p>
           <div className="mt-7 flex flex-wrap gap-3">
             <Link
@@ -92,6 +95,41 @@ export default function Home() {
         </div>
       </section>
 
+      <section aria-labelledby="secret-intel" className="border-t bg-card/50">
+        <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6">
+          <h2 id="secret-intel" className="text-3xl font-semibold tracking-tight">
+            Secret vs. intel
+          </h2>
+          <p className="mt-2 max-w-3xl text-lg text-muted-foreground">
+            Ordinary data-loss tools catch secrets. MasqAI also stops intel.
+          </p>
+          <div className="mt-8 grid gap-4 md:grid-cols-2">
+            <Kind
+              icon={<KeyRound aria-hidden className="size-5 text-leak" />}
+              title="Secret"
+              definition="A concrete string that unlocks or identifies something."
+              handling="Masked: reversible, restored in tool calls."
+              examples={[
+                ["sk-or-v1-FAKEFAKE5e2b…", "an API key"],
+                ["C:\\Users\\alice\\…\\prod\\inventory.db", "a path to private data"],
+                ["DESKTOP-7Q2XK9M", "a device name"],
+              ]}
+            />
+            <Kind
+              icon={<Telescope aria-hidden className="size-5 text-replaced" />}
+              title="Intel"
+              definition="Something the endpoint could conclude about you."
+              handling="Hidden or replaced: lossy, never restored."
+              examples={[
+                ["“a short walk from Davis Square”", "where someone lives"],
+                ["an env dump with every drive and tool", "the shape of your machine"],
+                ["the agenda of an unreleased design doc", "what your team is building"],
+              ]}
+            />
+          </div>
+        </div>
+      </section>
+
       <section aria-labelledby="threats" className="border-y bg-card/50">
         <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6">
           <h2 id="threats" className="text-3xl font-semibold tracking-tight">
@@ -103,17 +141,17 @@ export default function Home() {
               asset="The key"
               threat="Whoever obtains it: a leak, a shared team key, a borrowed key."
               defense="Key Enigma"
-              defenseText="Rotates the upstream key continuously, so a leaked key dies within minutes. Planted canary keys catch relays that reuse traffic."
-              status="Planned this weekend"
+              defenseText="Rotates the upstream key continuously, so a leaked key dies within minutes. Canary keys catch a relay that reuses your traffic."
+              status="Stretch goal: planned"
               href="/trust"
             />
             <ThreatCard
               icon={<ScanSearch aria-hidden className="size-6 text-ent-path" />}
               asset="The context"
-              threat="Whoever operates the endpoint: the provider, a reseller, a relay."
-              defense="Sanitizer"
-              defenseText="Masks secrets and collapses noisy tool output on your machine before anything goes upstream, then restores real values in tool calls."
-              status="Working prototype"
+              threat="Whoever operates the endpoint: a provider, a cheap reseller, a relay, an opaque agent app."
+              defense="The sanitizer"
+              defenseText="Detectors and a local security model mask secrets and hide or replace intel before anything reaches the untrusted model, then restore real values in tool calls."
+              status="Prototype works; rebuild in progress"
               href="/how-it-works"
             />
           </div>
@@ -122,26 +160,31 @@ export default function Home() {
 
       <section aria-labelledby="pipeline" className="mx-auto max-w-7xl px-4 py-14 sm:px-6">
         <h2 id="pipeline" className="text-3xl font-semibold tracking-tight">
-          Every request, three steps
+          Every request, inspected before it leaves
         </h2>
-        <ol className="mt-8 grid gap-4 md:grid-cols-3">
+        <ol className="mt-8 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <Step n={1} icon={<Binary aria-hidden className="size-5" />} title="Detectors">
-            Regex and entropy checks for API keys, JWTs, emails, PEM blocks, host names, usernames and home paths.
+            Rule tables for keys, PEM blocks, emails, cloud tokens, passwords and host identifiers. Fast, can’t be
+            prompt-injected, and they only ever mask.
           </Step>
-          <Step n={2} icon={<BrainCircuit aria-hidden className="size-5" />} title="Local security model">
-            A 7B model in Ollama catches what regex misses. It <em>masks</em> a value (reversible placeholder, real value
-            kept in RAM) or <em>collapses</em> noisy output into a one-line summary.
+          <Step n={2} icon={<Copy aria-hidden className="size-5" />} title="Auto masks">
+            Every exact copy of a known value is masked too, but never inside a longer word: with username{" "}
+            <code className="font-mono">andy</code>, “handy” is left for the security model to judge.
           </Step>
-          <Step n={3} icon={<RotateCcw aria-hidden className="size-5" />} title="Restore">
-            When the model calls a tool, placeholders in its arguments become real values again, locally. Commands run
-            on real paths; the relay never saw them.
+          <Step n={3} icon={<BrainCircuit aria-hidden className="size-5" />} title="Security model">
+            Adds the masks the rules missed, vetoes wrong auto masks, links partial forms, and hides or replaces intel in
+            tool results.
+          </Step>
+          <Step n={4} icon={<RotateCcw aria-hidden className="size-5" />} title="Restore">
+            In tool-call arguments only, placeholders become real values again, locally. The untrusted model’s text is
+            never modified.
           </Step>
         </ol>
         <p className="mt-6 flex items-start gap-3 rounded-lg border border-leak/40 bg-leak/6 p-4 text-pretty">
           <Ban aria-hidden className="mt-0.5 size-5 shrink-0 text-leak" />
           <span>
-            <strong className="font-semibold">Fails closed.</strong> If the security model breaks, the request is
-            blocked with HTTP 502. Nothing goes upstream raw.
+            <strong className="font-semibold">Fails closed.</strong> Security model down or answering nonsense: 502.
+            Content it can’t inspect: 422. Unsupported endpoint: 404. Nothing is ever sent raw.
           </span>
         </p>
         <div className="mt-8 flex flex-wrap gap-3">
@@ -149,13 +192,13 @@ export default function Home() {
             href="/demo"
             className="inline-flex min-h-11 items-center gap-2 rounded-md bg-primary px-5 font-medium text-primary-foreground hover:bg-primary/85"
           >
-            See it on six real tasks <ArrowRight aria-hidden className="size-4" />
+            See it on eight tasks <ArrowRight aria-hidden className="size-4" />
           </Link>
           <Link
-            href="/how-it-works"
+            href="/results"
             className="inline-flex min-h-11 items-center gap-2 rounded-md border bg-card px-5 font-medium hover:bg-accent"
           >
-            How it works
+            See the numbers
           </Link>
         </div>
       </section>
@@ -198,8 +241,41 @@ function ThreatCard({
       </p>
       <p className="mt-1 flex-1 text-muted-foreground">{defenseText}</p>
       <Link href={href} className="mt-4 inline-flex items-center gap-1 font-medium underline-offset-4 hover:underline">
-        More on {defense} <ArrowRight aria-hidden className="size-4" />
+        More on {defense.replace(/^The /, "the ")} <ArrowRight aria-hidden className="size-4" />
       </Link>
+    </article>
+  );
+}
+
+function Kind({
+  icon,
+  title,
+  definition,
+  handling,
+  examples,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  definition: string;
+  handling: string;
+  examples: [string, string][];
+}) {
+  return (
+    <article className="rounded-xl border bg-card p-6">
+      <h3 className="flex items-center gap-3 text-xl font-semibold">
+        {icon}
+        {title}
+      </h3>
+      <p className="mt-2 text-lg">{definition}</p>
+      <p className="mt-1 text-muted-foreground">{handling}</p>
+      <ul className="mt-4 space-y-2">
+        {examples.map(([example, meaning]) => (
+          <li key={example} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 rounded-md border bg-background px-3 py-2">
+            <code className="font-mono text-[15px] break-all">{example}</code>
+            <span className="text-sm text-muted-foreground">{meaning}</span>
+          </li>
+        ))}
+      </ul>
     </article>
   );
 }
