@@ -2,6 +2,8 @@
 
 The first gateway prototype is available. See [Running MasqAI](RUNNING.md) for installation, configuration, agent routing, and current implementation limits. The design below also describes capabilities that are still proposed.
 
+The public showcase site (static, synthetic data only) lives in [`web/`](web/README.md).
+
 **A context firewall for AI agents.**
 
 > *Your LLM key is a two-way mirror. MasqAI makes it one-way.*
