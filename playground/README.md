@@ -91,11 +91,11 @@ $env:MASQAI_CONFIG = "playground\.state\masqai.playground.json"
 .\.venv\Scripts\python run_gateway.py
 ```
 
-**Check:** `.\.venv\Scripts\python playground\tools.py status` should show MasqAI up, the relay up,
+**Check:** set `$env:MASQAI_ADMIN_TOKEN` to the token MasqAI printed at startup, then `.\.venv\Scripts\python playground\tools.py status` should show MasqAI up, the relay up,
 and (in local mode) Ollama up with the security model pulled.
 
 **Browser:**
-- http://127.0.0.1:8787: MasqAI Context inspector (raw vs sanitized, mapping table).
+- the `GUI: http://127.0.0.1:8787/#token=…` URL MasqAI printed at startup: Context (raw vs sanitized), Security, Mapping and Config tabs.
 - http://127.0.0.1:8788: relay view (what the endpoint operator collected). Each request is tagged
   `direct` (unprotected) or `masq` (via MasqAI) and counts the leaked identifiers.
 
@@ -147,14 +147,14 @@ or sets `LEDGER_JDK` for the build, then `.\build.ps1` prints `Ledger OK: 3 acco
 **What to look at:**
 - Relay, `direct` route: the full environment dump, with your hostname, username, profile path, CPU
   identifier, AWS key, GitHub token and DB password highlighted.
-- Relay, `masq` route: the dump arrives with `…[MASQ_BLOCK: …]…` lines in place of the irrelevant
+- Relay, `masq` route: the dump arrives with `…[hidden: …]…` lines in place of the irrelevant
   variables. `JAVA_HOME` and `Path` are kept, possibly with `<PATH_…>` for the user part.
 - The bytes for that request are far lower on the `masq` route.
 - MasqAI inspector: the `tool_result` item with its line differences.
 
 **Pass:** the build succeeds, the `masq` route leaks nothing, and the env-dump request is clearly
 smaller. **Partial:** the build succeeds but some host identifier gets through (e.g. `NUMBER_OF_PROCESSORS`
-is not tracked, while `PROCESSOR_IDENTIFIER` is). **Fail:** a 502 from MasqAI (invalid collapse anchors,
+is not tracked, while `PROCESSOR_IDENTIFIER` is). **Fail:** a 502 from MasqAI (invalid hide anchors twice,
 see section 7), or the agent can't find the JDK because the pruning removed `JAVA_HOME`.
 
 ---
@@ -362,7 +362,7 @@ runs without resetting.
   For the full sanitized body, start MasqAI with `$env:MASQAI_LOG_LEVEL = "DEBUG"`.
 - **Chat text is not restored**, only tool-call arguments. The agent may tell you about `<PATH_…>` or
   `<EMAIL_…>`. Tool calls still act on the real values.
-- **Any invalid security-model output fails the whole request** (bad collapse anchors, an entity not
+- **Any invalid security-model output fails the whole request** (bad hide anchors after the correction round, an entity not
   present in the context, a summary that contains a known value). With a 7B model this happens. It is
   the fail-closed rule working, but it costs you the turn. Count it in the rehearsal log.
 - **`sk-or-v1-…` keys are labelled `OPENAI_KEY`** by the detector.

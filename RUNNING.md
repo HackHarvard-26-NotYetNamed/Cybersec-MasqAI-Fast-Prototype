@@ -1,89 +1,115 @@
 # Running MasqAI
 
-This MVP accepts local, unauthenticated clients on `127.0.0.1:8787`. It supports OpenAI Chat Completions, OpenAI Responses, Anthropic Messages, and Anthropic token counting. Key Enigma is not implemented.
+The gateway runs on your machine, binds to `127.0.0.1` only, and keeps all state in RAM.
 
 ## Start
 
-Python 3.12 is supported. From the project directory:
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python -m pip install -r requirements.txt
-Copy-Item masqai.json.example masqai.json
-$env:OPENROUTER_API_KEY = "your-key"
-.\.venv\Scripts\python run_gateway.py
+```bash
+python -m venv .venv && . .venv/bin/activate        # Windows: .\.venv\Scripts\activate
+pip install -r requirements.txt
+ollama pull qwen2.5:7b                               # the default security model (local)
+cp masqai.json.example masqai.json
+export OPENROUTER_API_KEY=sk-or-v1-...               # PowerShell: $env:OPENROUTER_API_KEY = "..."
+python run_gateway.py [--config masqai.json] [--playground]
 ```
 
-Open **http://127.0.0.1:8787**. It has three tabs:
+On every start the gateway generates a fresh admin token and prints it once:
 
-- **Context** (`#`): sessions on the left, the mapping table (placeholder, real value, marked partial forms, links, origin, uses) on the right. In the middle, each context item is shown as one card. Changed items show the raw text and the sent text side by side, aligned line by line: a red line did not go out as-is, and the green line next to it is what went out instead. Long unchanged runs fold into "N unchanged lines". Unchanged items appear once, full width ("identical upstream"), and runs of unchanged tool descriptions are grouped into one line. On the raw side, the exact characters that were masked are highlighted, and known values deliberately left as-is (inside a longer word, or vetoed) are outlined with a dashed line. On the sent side, placeholders, `<$…>` partial-form placeholders and `…[MASQ_BLOCK]…` markers are highlighted. Hover any of them to see what it means. You can filter by item kind or show changed items only, and search both sides; clicking a mapping row searches for its value.
-- **Security model** (`#security`): one entry per sanitize pass (the last 100), updated live. Each pass is shown in four steps (detectors → security model → each operation checked → applied), with a running timer against `timeout_seconds` while the model is working. You can see what the model received: the instructions, the new items with numbered lines (what is already masked is outlined), the earlier operations nearby with their surrounding lines, the mapping table, the conversation, the recent tool context, and the exact input JSON. Then each answer: the raw output (also when rejected), and every operation with its verdict (✓ effect or ✕ reason). If some were rejected, the errors sent back and the correction appear as a second answer. Finally the effect: new values, and which items changed, including earlier items that were re-masked. Item refs (`#3`) link to the Context tab. These traces contain raw values and live in RAM only; they are never logged.
-- **Configuration** (`#config`): a form for every setting, with an explanation under each field.
+```
+  MasqAI http://127.0.0.1:8787  (agents: http://127.0.0.1:8787/v1)
+  GUI: http://127.0.0.1:8787/#token=…
+  MASQAI_ADMIN_TOKEN=…
+```
 
-On the Configuration tab, **Apply** validates the whole configuration and switches the running gateway to it; problems are shown in red next to the field concerned and nothing changes until they are fixed. Applied changes live in RAM and are lost on restart: use **Export JSON** to download a `masqai.json` that keeps them. Host and port are fixed at startup. Set `MASQAI_CONFIG` to use another config path. Keys are referenced only by environment variable name (`api_key_env`); a literal `api_key`, or an `Authorization`/`x-api-key`-style entry in a provider's `headers`, is rejected when the config is loaded or applied. The panel shows whether each named variable is set in the gateway's environment, never its value. A provider without `api_key_env` sends no credentials (e.g. local Ollama).
+Open the GUI URL. The page moves the token from the URL into sessionStorage. Every `/api/*` call needs it as
+`x-masqai-token`; the agent endpoints (`/v1/*`), `/` and `/static/*` don't. The token is never written to disk.
+`--playground` enables the replay export (it contains raw values; demos only). An invalid config fails at
+startup with the field that is wrong, instead of failing every request later.
 
-The example expects an Ollama security model at `http://127.0.0.1:11434` named `qwen2.5:7b`. Install a model separately, or configure a trusted remote security provider. No model is downloaded automatically. Local OpenAI-compatible servers can omit authentication. An explicitly configured but unset environment variable fails the security call.
+Point the agent at `http://127.0.0.1:8787/v1` (OpenAI style) or `http://127.0.0.1:8787` (Anthropic style).
+Send `x-masqai-session: <id>` if your agent can; otherwise sessions are matched by history.
 
-## Routing
+## Endpoints
 
-Every provider has a name, `base_url`, `format` (`openai` or `anthropic`), optional `api_key_env`, and optional headers. A base URL may end in `/v1`; it will not be added twice. OpenRouter's base is `https://openrouter.ai/api`.
-
-The `routes` object maps downstream aliases to `{ "provider": "name", "model": "upstream-model-id" }`. Unknown names use `default_route`, preserving the requested model if the route has no model override. Wire formats are forwarded, **not converted**: an Anthropic request needs an upstream supporting Anthropic Messages, and a Responses request needs Responses support. Changing a provider's format sets authentication conventions; it does not translate protocols.
-
-For an OpenCode OpenAI-compatible provider, use base URL `http://127.0.0.1:8787/v1`, any dummy API key required by its client library, and one of your configured model aliases. For an Anthropic client, use base URL `http://127.0.0.1:8787`. Set provider credentials on MasqAI, not in the agent. OpenCode configuration syntax varies by release; no OpenCode configuration files are generated by this project.
-
-### Request headers
-
-`headers.mode` is `blocklist` (default) or `allowlist`. In blocklist mode every client header is forwarded except those in `headers.blocklist` (default: `api-key`, `x-goog-api-key`, `cookie`). In allowlist mode only headers in `headers.allowlist` are forwarded. Entries are case-insensitive and a trailing `*` matches a prefix (`x-stainless-*`). In both modes the client's `authorization`, `proxy-authorization` and `x-api-key` and hop-by-hop headers (`host`, `connection`, `content-length`, `accept-encoding`, …, plus any named in `Connection`) are always dropped; the provider's key and `provider.headers` are then added.
-
-## Security configuration
-
-`security.provider` and `security.model` select the security model independently of upstream agent models. `api_format` selects `openai` Chat Completions or `anthropic` Messages. `system_prompt` overrides the built-in inspection instructions; it must keep the JSON operation contract below. Setting `enabled: false` explicitly selects a detector-only baseline.
-
-**What the security model is given.** It inspects only items it has not inspected before (`new_items`, each with numbered raw lines, what is already masked there, and known values left as-is). It also receives the earlier operations nearest to those items by position in the conversation (`nearest_ops`, default `-1` = all), each with `op_context_lines` raw lines above and below (default 2), and the mapping table. For the task intent, it gets every user and assistant message, plus the last `recent_items` tool calls, tool results and reasoning items, read-only. `context_mode: "full"` is the same input with all three limits removed.
-
-**What it returns.** `{"operations": [...]}`, where every operation points at exactly one occurrence and nothing is replaced anywhere else by it:
-
-| Operation | Meaning |
+| Endpoint | Behavior |
 |---|---|
-| `{"op":"mask","item":"#4","line":12,"text":"…","nth":1,"type":"PATH","label":"p1"}` | a new value at this occurrence. `text` is copied exactly and starts on `line` (it may span lines); `nth` picks among several on that line. `label` lets later operations in the same answer refer to it. |
-| `{"op":"mask",…,"token":"<PATH_…>"}` | another occurrence of a known value (text must equal it) |
-| `{"op":"mask",…,"token":"<PATH_…>","alias":true}` | a partial or changed form of a known value at this occurrence, sent as `<$PATH_…>` |
-| `{"op":"collapse","item":"#5","start":7,"end":40,"first":"…","last":"…","summary":"…"}` | tool results only. Lines 7–40 become `…[MASQ_BLOCK: summary]…`; `first`/`last` must equal those raw lines; the summary is one line of at most 200 characters with no known value or placeholder. |
-| `{"op":"relink","token":"<KEY_a…>","to":"<KEY_b…>"}` | an earlier separate value is a form of a newer one: every occurrence of the first is then sent as `<$KEY_b…>` |
-| `{"op":"unmask","item":…,"line":…,"text":…}` | only with `auto_mask: "auto_veto"`: keep one automatic copy of a known value as-is |
+| `POST /v1/chat/completions`, `/v1/responses`, `/v1/messages` | sanitize, forward, restore tool-call arguments (streaming or not) |
+| `POST /v1/messages/count_tokens` | sanitize (it sends the full context), forward |
+| `GET`/`HEAD /v1/models[/…]` | the only unsanitized passthrough |
+| any other `/v1/*`, including trailing-slash variants | `404 masqai_unsupported_endpoint`, nothing sent |
 
-**Automatic copies.** Exact copies of a known value (found by a detector or by an earlier mask) are masked automatically everywhere, including the system prompt and tool descriptions, and retroactively in earlier messages. A copy is skipped when the character before or after it is a letter, digit or `_` (so `ANDY` does not turn `HANDY` into `H<USERNAME_…>`). In tool-call JSON, the JSON-escaped form of a value is matched too. Partial forms marked with `alias` are never copied automatically: the model marks each occurrence.
+Fail closed, nothing sent upstream:
 
-**Validation.** Each operation is checked on its own: the text must be at that line, it must not cross an existing mask (containing one is fine), a mask in tool-call JSON must not break the JSON, and tokens must exist. Valid operations are applied. If any are rejected, only the errors are sent back in one follow-up call; if a correction is still invalid, or the model fails, times out or returns non-JSON, the request is blocked (fail closed, HTTP 502).
+| Event | Response |
+|---|---|
+| security model error, timeout, invalid JSON, or invalid after one correction round | `502` (`reason`: `security_model_failed` / `invalid_correction`) |
+| security provider not on loopback and `allow_remote_security_model` is false | `502` (`remote_security_model_refused`), refused before anything is sent |
+| unknown content type (e.g. an OpenAI `image_url`) with `pass_unknown: false` | `422`, before a session or trace exists; says where and what type, never the content |
+| unsupported endpoint | `404` |
 
-Masking covers user/assistant content, tool arguments, and tool results. System content and tool descriptions receive automatic copies of known values only. Protocol identifiers, unknown blocks, images, audio, signatures, encrypted reasoning and reasoning blocks are preserved. Collapsed content remains in the original in-memory context. Operations are stored per item (by content hash), so resent items are sanitized the same way, and a rolled-back item simply stops using them.
+Errors returned to clients never echo exception text; details are in the console and on the Security tab.
 
-Ordinary output text and reasoning are passed through; only tool arguments are restored, each placeholder (including `<$…>` and linked tokens) to the canonical value of the entity it ultimately links to. JSON arguments are decoded before restoring string values. Streams forward ordinary events immediately and buffer each tool's arguments until its boundary. The dashboard consumes normalized context items, including incremental response observations, with line differences highlighted. It does not read upstream SSE directly.
+## Configuration (`masqai.json`)
 
-## Session tracking and current limits
+See [`masqai.json.example`](masqai.json.example). Unknown keys are rejected at load. Highlights:
 
-Explicit session/conversation headers win, followed by metadata hints and `prompt_cache_key`/`user`. Without hints, a request continues the stored history it shares the longest prefix with. Leading system/developer messages do not count, so two conversations from the same agent are not merged on the system prompt alone. If the request diverges from that history (compaction, an edited or retried turn), the session is rolled back: its items after the divergence point are replaced, its mapping table is kept, and the GUI's `rollbacks` counter increases. A tie between equally good candidates, or a new hint whose history matches an existing session, creates a new session that inherits the parent's mappings (`parent_id`). Hints such as `user` may group unrelated conversations: prefer a real session ID. There is not yet a manual GUI rollback/history browser or persistent revision archive.
+- **providers**: `api_key_env` is an environment variable **name**, never the value. The names referenced at startup
+  are frozen: the GUI may reassign them between providers but not add new ones.
+- **routes / default_route**: model alias → provider and upstream model.
+- **pass_unknown** (default `false`): forward content MasqAI can't inspect raw, with a warning, instead of 422.
+- **security**: `provider`, `model`, `api_format` (`openai`/`anthropic`), `allow_remote_security_model` (default
+  `false`: only `127.0.0.0/8`, `::1` or `localhost`, no DNS lookup), `timeout_s`, `context_mode` (`recent`/`full`),
+  `recent_items`, `nearest_ops`, `op_context_lines`, `auto_mask` (`auto` or `auto_veto`, the default: the model may veto
+  a wrong automatic mask), and `system_prompt` (empty = the built-in [`masqai/prompts/security.md`](masqai/prompts/security.md);
+  a prompt written for the prototype's `collapse` op is rejected).
+- **detectors**: `detect_host_identifiers` (hostname, OS username, home paths), `custom_values` (names, handles, emails
+  to always mask), `rules_dir` (rule tables, default [`masqai/rules`](masqai/rules)).
+- **headers**: blocklist mode by default. Always dropped: the client's credentials, `x-masqai-*` and hop-by-hop headers.
+  The default blocklist also drops cookies, other providers' key headers, `x-stainless-os/-arch/-runtime/-runtime-version/
+  -package-version/-lang` (`-retry-count` and `-timeout` pass), client session ids (read locally as hints first),
+  `x-forwarded-*`, `x-real-ip`, `forwarded`, `via`, `http-referer`, `x-title`. `user_agent` (default `masqai/0.2.0`)
+  replaces the client's User-Agent; empty forwards the client's own.
+- **retention**: `idle_ttl_h` (12) and `max_sessions` (50, LRU). Busy sessions are never evicted.
 
-Sessions, original data, mapping tables and GUI edits live in RAM. The prototype does not lock memory against swap. Requests and snapshots are not written to application logs, but HTTP access logging can show endpoint paths. The GUI deliberately shows raw secrets to the local user. It is not a multi-user service.
+`user`, `metadata.user_id`, `safety_identifier` and `prompt_cache_key` are always replaced with a per-session
+pseudonym (`masq-` + 128 random bits). Other `metadata` keys pass.
 
-Other limitations: no hidden-block retrieval protocol, binary input sanitization, cross-format conversion, budget enforcement, key rotation, or automatic client compaction recovery. Deterministic detectors are intentionally conservative and are not a guarantee of complete secret coverage. Full-context mode can exceed a model's window and then fails closed. Exact SSE chunk boundaries change around tool arguments; tool content text and reasoning are not rewritten. Concurrent requests sharing one session serialize sanitization, but simultaneous streamed responses can overlap in the inspector. Very large contexts may slow browser diffing; the viewer switches to coarse highlighting for large pairs.
+## The GUI
 
-## Diagnostic logs
+| Tab | What it shows |
+|---|---|
+| Context | the dual-reality inspector: raw vs. sent, per item; who masked what (detector, automatic copy, security model), vetoed and left-as-is copies, hidden and replaced intel, opaque items, relinks and the "cache broken" count |
+| Security | every security-model call: its exact input, raw answer, each operation ✓/✗ with its error, the correction round, why a request was blocked |
+| Mapping | the entity table (token, type, class, origin, uses, linked-to, real value) and Forget session |
+| Config | a live editor with inline validation, the security prompt, the remote-model switch, env names as a dropdown |
 
-The gateway logs to its console. Every line carries a request id (`[req12]`), so one request's lines can be followed even when several run at once. For each request it logs:
+The GUI shows raw values to you, the local user. Use the playground or a demo account before sharing your screen.
 
-- **Routing:** requested model, provider, upstream model, whether it came from an alias or `default_route`, and the URL. It warns when no model is set or when the provider's `api_key_env` is not set.
-- **Request shape:** message count by role, tool names, and sampling parameters (`temperature`, `stream`, …). `user`/`metadata` are logged only as `<set>`.
-- **Upstream errors:** status, latency, diagnostic headers (`x-request-id`, `retry-after`, …) and the **error body**, which is what explains a 400 (unknown model id, an unsupported parameter, context too long). Error events sent inside a 200 stream are logged too.
-- **Security model:** each call (including a correction), then the number of operations accepted and rejected, or the reason it failed (HTTP status and body, timeout, invalid JSON, or corrections still invalid). Rejection details contain raw text and are shown only on the Security page. A blocked request is logged as `blocked (fail closed)`.
+## Control API (`/api/*`, admin token required)
 
-Raw context is never logged. Error bodies often echo the request, so known mappings are applied to them before logging. Set `MASQAI_LOG_LEVEL=DEBUG` to also log the full *sanitized* body sent upstream. That is the same text the upstream receives, but don't keep DEBUG output in files.
+`GET /api/state` · `GET /api/sessions/{id}` · `POST /api/sessions/{id}/forget` · `GET /api/security` ·
+`GET /api/events` (SSE: `trace`, `session`, `forget`, `config`, `warning`, `forwarded`; read it with `fetch`, since
+`EventSource` can't send the header) · `GET`/`POST /api/config` · `GET /api/config/meta` · `GET /api/env/{name}`
+(startup names only, never the value) · `GET /api/sessions/{id}/replay?synthetic=1` (only with `--playground`; streams the
+public site's replay JSON with host identifiers replaced by fake ones; the gateway never writes it to disk).
+
+Every request that reaches the upstream emits a `forwarded` event with the SHA-256 of the sanitized body. The
+eval harness uses it to count requests.
+
+## Logs
+
+Logs carry routing decisions, request shapes, timings and statuses, never raw context. Upstream error bodies
+are masked with the session's known values before they are logged. `MASQAI_LOG_LEVEL=DEBUG` adds the
+*sanitized* outbound body, which is what the untrusted model sees anyway. The filesystem is untrusted:
+don't keep DEBUG output.
 
 ## Verification
 
-```powershell
-python -m unittest discover -s tests -v
+```bash
+python -m pytest -q                       # core, proxy end to end, hardening, injection scoring, eval harness
+python scripts/scan_repo.py               # MasqAI's detectors over the repo itself
+python -m tests.injection.run_injection --config masqai.json --runs 20   # needs the security model
 ```
 
-The tests use an in-process fake upstream. Real upstream credentials/model availability and a real OpenCode run must be checked in your environment before trusting this baseline for production work.
+Playground walkthrough (six agent tasks against an untrusted relay): [`playground/README.md`](playground/README.md).
+`playground/tools.py` needs `MASQAI_ADMIN_TOKEN` (printed at startup) to change the running config.

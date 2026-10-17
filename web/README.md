@@ -87,6 +87,14 @@ Notes on the fields:
 
 ### `results.json`: from the eval harness
 
+Produced by the Daytona harness in [`eval/`](../eval/README.md):
+
+```bash
+python -m eval.run_eval --cases all --conditions raw,masqai --runs 20
+python -m eval.run_eval --injection --runs 20        # optional: fills `injection`
+python -m eval.aggregate eval/out/runs.jsonl > web/public/data/results.json
+```
+
 ```json
 {
   "placeholder": false,
