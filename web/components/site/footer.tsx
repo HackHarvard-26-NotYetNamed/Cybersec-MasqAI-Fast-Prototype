@@ -9,7 +9,7 @@ export function SiteFooter() {
           showcase.
         </p>
         <p
-          className="inline-flex items-center gap-2 rounded-full border border-ent-key/50 bg-ent-key/10 px-3 py-1 font-mono text-xs font-medium text-ent-key"
+          className="inline-flex items-center gap-2 rounded-full border border-foreground/40 bg-card px-3 py-1 font-mono text-xs font-medium text-foreground"
           title="Every value on this site comes from the project's synthetic playground secrets."
         >
           <FlaskConical aria-hidden className="size-3.5" />

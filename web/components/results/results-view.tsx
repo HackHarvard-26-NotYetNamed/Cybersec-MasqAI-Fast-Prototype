@@ -1,13 +1,13 @@
 "use client";
 
 import { Bar, BarChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Clock, Coins, FlaskConical, Info, ShieldAlert, Target } from "lucide-react";
+import { Bug, Clock, Coins, FlaskConical, Info, ShieldAlert, Target } from "lucide-react";
 import type { ReactNode } from "react";
 import { ResultsSchema, useJson, type Metrics, type Results } from "@/lib/data";
 import { useThemeColors } from "@/lib/use-theme-colors";
 import { DataError, Loading } from "@/components/site/page-bits";
 
-const WATERMARK = "PLACEHOLDER — replace with real eval run";
+const WATERMARK = "PLACEHOLDER: replace with real eval run";
 
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 const ms = (v: number) => `${Math.round(v).toLocaleString("en-US")} ms`;
@@ -102,6 +102,8 @@ function ResultsBody({ data }: { data: Results }) {
         <ResultsTable data={data} />
       </section>
 
+      {data.injection.length ? <Injection attacks={data.injection} /> : null}
+
       <div className="grid gap-4 lg:grid-cols-2">
         <section aria-labelledby="method" className="rounded-lg border bg-card p-5">
           <h2 id="method" className="flex items-center gap-2 text-lg font-semibold">
@@ -111,22 +113,20 @@ function ResultsBody({ data }: { data: Results }) {
           <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-6 gap-y-2">
             <Row k="Runs per case" v={String(data.runsPerCase)} />
             <Row k="Security model" v={data.securityModel} />
+            <Row k="Untrusted model" v={data.untrustedModel} />
             <Row k="Agent" v={data.agent} />
-            <Row k="Sandbox provider" v={data.sandbox} />
+            <Row k="Sandbox" v={data.sandbox} />
             <Row k="Date" v={formatDate(data.generatedAt)} />
             <Row k="Use cases" v={String(cases.length)} />
           </dl>
           <p className="mt-3 text-sm text-muted-foreground">
-            “Raw” sends the same task straight to the relay. “MasqAI” routes it through the local gateway first. A
-            leak is any planted synthetic secret seen by the relay during a run.
+            “Raw” sends the same task straight to the untrusted model. “MasqAI” routes it through the local gateway
+            first. A leak is any planted synthetic secret or intel canary seen on the untrusted side during a run.
           </p>
         </section>
-        <section
-          aria-labelledby="honesty"
-          className="rounded-lg border border-ent-key/50 bg-ent-key/8 p-5"
-        >
+        <section aria-labelledby="honesty" className="rounded-lg border-2 border-foreground/30 bg-card p-5">
           <h2 id="honesty" className="flex items-center gap-2 text-lg font-semibold">
-            <Info aria-hidden className="size-5 text-ent-key" />
+            <Info aria-hidden className="size-5" />
             Honesty note
           </h2>
           <p className="mt-3 text-lg text-pretty">
@@ -158,24 +158,54 @@ function Watermark() {
     <>
       <p
         role="note"
-        className="flex items-center gap-2 rounded-lg border-2 border-dashed border-ent-key/70 bg-ent-key/10 px-4 py-3 font-mono font-semibold text-ent-key"
+        className="flex items-center gap-2 rounded-lg border-2 border-dashed border-foreground/40 bg-card px-4 py-3 font-mono font-semibold"
       >
         <FlaskConical aria-hidden className="size-5 shrink-0" />
         {WATERMARK}. These numbers are mock values, not measurements.
       </p>
-      <div aria-hidden className="pointer-events-none absolute inset-0 z-10 overflow-hidden select-none">
-        <div className="absolute inset-[-50%] flex rotate-[-24deg] flex-col items-center justify-around">
-          {Array.from({ length: 10 }, (_, i) => (
-            <span
-              key={i}
-              className="font-mono text-3xl font-bold tracking-widest whitespace-nowrap text-ent-key opacity-[0.09] sm:text-5xl"
-            >
-              {WATERMARK} · {WATERMARK}
-            </span>
-          ))}
-        </div>
+      {/* One large diagonal mark across the viewport, behind nothing interactive. */}
+      <div aria-hidden className="pointer-events-none fixed inset-0 z-30 flex items-center justify-center overflow-hidden select-none">
+        <span className="-rotate-[28deg] font-mono text-[clamp(2.25rem,7vw,6.5rem)] font-black tracking-wider whitespace-nowrap text-foreground opacity-[0.07]">
+          {WATERMARK}
+        </span>
       </div>
     </>
+  );
+}
+
+function Injection({ attacks }: { attacks: Results["injection"] }) {
+  return (
+    <section aria-labelledby="injection" className="rounded-lg border border-leak/50 bg-card p-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 id="injection" className="flex items-center gap-2 text-xl font-semibold">
+          <Bug aria-hidden className="size-5 text-leak" />
+          Prompt injection against the security model
+        </h2>
+        <p className="rounded-full border border-leak/60 px-3 py-0.5 text-sm font-medium text-leak">
+          Known open issue. Measured, not yet defended.
+        </p>
+      </div>
+      <p className="mt-2 max-w-3xl text-muted-foreground">
+        Tool output that tries to talk the security model out of its job. Each bar is the share of attempts where the
+        attack worked.
+      </p>
+      <ul className="mt-4 space-y-3">
+        {attacks.map((a) => {
+          const rate = a.succeeded / a.attempts;
+          return (
+            <li key={a.attack} className="grid gap-1 sm:grid-cols-[14rem_1fr_12rem] sm:items-center sm:gap-4">
+              <span className="font-medium">{a.attack}</span>
+              <span aria-hidden className="h-4 rounded-r-sm bg-muted">
+                <span className="block h-full rounded-r-[4px] bg-leak" style={{ width: `${Math.max(rate * 100, 0.5)}%` }} />
+              </span>
+              <span className="font-mono text-sm tabular-nums">
+                {pct(rate)} succeeded <span className="text-muted-foreground">({a.succeeded}/{a.attempts})</span>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 

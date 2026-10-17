@@ -11,7 +11,7 @@ export default function ResultsPage() {
   return (
     <div className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6 sm:py-10">
       <PageIntro eyebrow="Evaluation" title="What MasqAI costs, and what it buys">
-        Every use case runs repeatedly with the same agent and task, once straight to the relay and once through
+        Every use case runs repeatedly with the same agent and task, once straight to the untrusted model and once through
         MasqAI. All numbers and charts come from <code className="font-mono text-foreground">results.json</code>.
       </PageIntro>
       <ResultsView />
