@@ -1,4 +1,4 @@
-// Regenerates public/data/replays/index.json from the replay files in that folder.
+// Regenerates public/data/replays/index.json (an array of {id, title, file}) from the replay files in that folder.
 // Runs before `dev` and `build`, so dropping in a new uc*.json is enough to add it to /demo.
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -16,5 +16,5 @@ for (const file of readdirSync(dir).filter((f) => f.endsWith(".json") && f !== "
     replays.push({ id: file.replace(/\.json$/, ""), title: file, file });
   }
 }
-writeFileSync(join(dir, "index.json"), JSON.stringify({ replays }, null, 2) + "\n");
+writeFileSync(join(dir, "index.json"), JSON.stringify(replays, null, 2) + "\n");
 console.log(`index-replays: ${replays.length} replays`);

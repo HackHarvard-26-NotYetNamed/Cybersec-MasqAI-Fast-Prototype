@@ -17,7 +17,7 @@ function KeyTrustBody({ data }: { data: Keys }) {
   const alerts = data.honeytokens.filter((h) => h.usedAt !== null);
   return (
     <div className="space-y-6">
-      {data.placeholder ? (
+      {data.status === "planned" ? (
         <p
           role="note"
           className="flex items-center gap-2 rounded-lg border-2 border-dashed border-ent-key/70 bg-ent-key/10 px-4 py-3 font-mono font-semibold text-ent-key"

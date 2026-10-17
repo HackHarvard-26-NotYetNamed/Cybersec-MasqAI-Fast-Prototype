@@ -1,0 +1,120 @@
+{
+  "id": "uc8-intel-replace",
+  "title": "Intel in a design doc",
+  "summary": "Nothing in this document is a secret, but it says where the team meets and who lives nearby. The security model replaces those details with neutral words; the summary still works.",
+  "relayRequestCount": 2,
+  "headersStripped": [
+    "x-stainless-os",
+    "x-stainless-arch",
+    "x-stainless-runtime",
+    "x-session-id",
+    "http-referer",
+    "x-title"
+  ],
+  "pseudonymized": [
+    "prompt_cache_key"
+  ],
+  "steps": [
+    {
+      "t": 0,
+      "role": "user",
+      "itemKind": "user_message",
+      "raw": "Summarize docs/offsite-plan.md as three bullets I can post in the team channel.",
+      "sanitized": "Summarize docs/offsite-plan.md as three bullets I can post in the team channel.",
+      "ops": [],
+      "relinks": [],
+      "toolCall": null,
+      "blocked": null
+    },
+    {
+      "t": 3,
+      "role": "assistant",
+      "itemKind": "assistant_tool_call",
+      "raw": "Reading the plan.",
+      "sanitized": "Reading the plan.",
+      "ops": [],
+      "relinks": [],
+      "toolCall": {
+        "name": "read",
+        "argsSent": "docs/offsite-plan.md",
+        "argsRestored": "docs/offsite-plan.md"
+      },
+      "blocked": null
+    },
+    {
+      "t": 5,
+      "role": "tool",
+      "itemKind": "tool_result",
+      "raw": "# Q4 platform offsite\n\nWhere: the usual back room near Davis Square in Somerville, MA,\na short walk from Priya's place.\nWhen: Thursday 30 October, 09:30 to 16:00.\nWho: platform team. Priya Okafor runs the threat-model session.\n\nAgenda\n- 09:30 Recap: the leaked relay key and what it exposed\n- 11:00 Threat model for the new gateway\n- 14:00 Key rotation and canary keys: build or buy?\n- 15:30 Budget for the security model hardware",
+      "sanitized": "# Q4 platform offsite\n\nWhere: the usual back room near a local square in a nearby city,\na short walk from a teammate's home.\nWhen: Thursday 30 October, 09:30 to 16:00.\nWho: platform team. a teammate runs the threat-model session.\n\nAgenda\n- 09:30 Recap: the leaked relay key and what it exposed\n- 11:00 Threat model for the new gateway\n- 14:00 Key rotation and canary keys: build or buy?\n- 15:30 Budget for the security model hardware",
+      "ops": [
+        {
+          "alias": false,
+          "value": "Davis Square",
+          "with": "a local square",
+          "summary": null,
+          "placeholder": null,
+          "type": null,
+          "reason": "a specific neighborhood: reveals where the team meets",
+          "op": "replace",
+          "class": "intel",
+          "source": "model",
+          "verdict": "applied"
+        },
+        {
+          "alias": false,
+          "value": "Somerville, MA",
+          "with": "a nearby city",
+          "summary": null,
+          "placeholder": null,
+          "type": null,
+          "reason": "location of the team; not needed for a summary",
+          "op": "replace",
+          "class": "intel",
+          "source": "model",
+          "verdict": "applied"
+        },
+        {
+          "alias": false,
+          "value": "Priya's place",
+          "with": "a teammate's home",
+          "summary": null,
+          "placeholder": null,
+          "type": null,
+          "reason": "hints where a teammate lives",
+          "op": "replace",
+          "class": "intel",
+          "source": "model",
+          "verdict": "applied"
+        },
+        {
+          "alias": false,
+          "value": "Priya Okafor",
+          "with": "a teammate",
+          "summary": null,
+          "placeholder": null,
+          "type": null,
+          "reason": "a teammate's identity is not needed for the summary",
+          "op": "replace",
+          "class": "intel",
+          "source": "model",
+          "verdict": "applied"
+        }
+      ],
+      "relinks": [],
+      "toolCall": null,
+      "blocked": null
+    },
+    {
+      "t": 9,
+      "role": "assistant",
+      "itemKind": "assistant_text",
+      "raw": "- Thursday 30 October, 09:30 to 16:00, in a nearby city.\n- Morning: a recap of the leaked relay key, then a threat model for the new gateway, led by a teammate.\n- Afternoon: key rotation and canary keys (build or buy), then the hardware budget.",
+      "sanitized": "- Thursday 30 October, 09:30 to 16:00, in a nearby city.\n- Morning: a recap of the leaked relay key, then a threat model for the new gateway, led by a teammate.\n- Afternoon: key rotation and canary keys (build or buy), then the hardware budget.",
+      "ops": [],
+      "relinks": [],
+      "toolCall": null,
+      "blocked": null
+    }
+  ]
+}

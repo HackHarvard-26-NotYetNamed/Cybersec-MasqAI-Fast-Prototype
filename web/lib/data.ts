@@ -1,5 +1,6 @@
-// Data contracts for the public site. Everything rendered comes from static JSON in /public/data/,
-// validated here, so a malformed file shows a friendly error instead of crashing the page.
+// Data contracts for the public site. Field names match what the gateway emits
+// (GET /api/sessions/{id}/replay) and what the eval harness writes: do not rename them.
+// Everything is validated here, so a malformed file shows a friendly error instead of crashing.
 "use client";
 
 import { useEffect, useState } from "react";
@@ -7,19 +8,44 @@ import { z } from "zod";
 
 // ---------- replays ----------
 
-export const ENTITY_TYPES = ["PATH", "KEY", "EMAIL", "HOST", "USER"] as const;
-export type KnownEntityType = (typeof ENTITY_TYPES)[number];
+export const OpSchema = z.object({
+  op: z.enum(["mask", "hide", "replace", "relink", "unmask"]),
+  class: z.enum(["secret", "intel"]),
+  // Entity type, UPPER_SNAKE. PATH, KEY, EMAIL, HOST and USER get their own chip colors.
+  type: z.string().nullable().optional(),
+  placeholder: z.string().nullable().optional(),
+  alias: z.boolean().optional().default(false),
+  // The raw text the op acted on (for hide: the hidden lines).
+  value: z.string().nullable().optional(),
+  // replace: the neutral substitute.
+  with: z.string().nullable().optional(),
+  // hide: the one-line summary.
+  summary: z.string().nullable().optional(),
+  source: z.enum(["detector", "auto", "model"]),
+  verdict: z.enum(["applied", "vetoed", "left_as_is", "rejected_invalid"]),
+  reason: z.string().nullable().optional(),
+});
 
-export const EntitySchema = z.object({
-  // Known types get a dedicated chip color; anything else renders as a neutral "OTHER" chip.
-  type: z.string().min(1),
-  // For mask/partial: the placeholder in `sanitized`. For collapse: the full MASQ_BLOCK marker.
-  placeholder: z.string().min(1),
-  // The real value (or, for collapse, the original block). Synthetic in every shipped file.
-  value: z.string().min(1),
-  op: z.enum(["mask", "partial", "collapse"]),
-  // The security model missed it: the value went upstream verbatim. Counted as exposed.
-  missed: z.boolean().optional().default(false),
+export const RelinkSchema = z.object({
+  fromPlaceholder: z.string(),
+  toPlaceholder: z.string(),
+  // 0-based indexes into `steps` whose sanitized text was rewritten.
+  stepsRewritten: z.array(z.number().int().nonnegative()).default([]),
+  cacheBroken: z.boolean().default(true),
+});
+
+export const BLOCK_REASONS = {
+  security_model_failed: "Security model failed: fail closed",
+  invalid_correction: "Security model answer invalid twice: fail closed",
+  unknown_content_type: "Unrecognized content type: refused before inspection",
+  unsupported_endpoint: "Unsupported endpoint: nothing forwarded",
+  remote_security_model_refused: "Remote security model not allowed",
+} as const;
+export type BlockReason = keyof typeof BLOCK_REASONS;
+
+export const BlockedSchema = z.object({
+  reason: z.enum(Object.keys(BLOCK_REASONS) as [BlockReason, ...BlockReason[]]),
+  status: z.union([z.literal(502), z.literal(422), z.literal(404)]),
 });
 
 export const ToolCallSchema = z.object({
@@ -30,14 +56,14 @@ export const ToolCallSchema = z.object({
 
 export const StepSchema = z.object({
   t: z.number().nonnegative(),
-  role: z.enum(["user", "assistant", "tool"]),
+  role: z.enum(["user", "assistant", "tool", "system"]),
+  itemKind: z.string().nullable().optional(),
   raw: z.string(),
   sanitized: z.string(),
-  entities: z.array(EntitySchema).default([]),
+  ops: z.array(OpSchema).default([]),
+  relinks: z.array(RelinkSchema).nullable().optional().transform((v) => v ?? []),
   toolCall: ToolCallSchema.nullable().optional(),
-  blocked: z.boolean().default(false),
-  // Optional narration shown above the step (e.g. "Ollama stopped").
-  note: z.string().optional(),
+  blocked: BlockedSchema.nullable().optional().transform((v) => v ?? null),
 });
 
 export const ReplaySchema = z.object({
@@ -45,14 +71,18 @@ export const ReplaySchema = z.object({
   title: z.string(),
   summary: z.string(),
   relayRequestCount: z.number().int().nonnegative(),
+  headersStripped: z.array(z.string()).default([]),
+  pseudonymized: z.array(z.string()).default([]),
   steps: z.array(StepSchema).min(1),
 });
 
-export const ReplayIndexSchema = z.object({
-  replays: z.array(z.object({ id: z.string(), title: z.string(), file: z.string() })).min(1),
-});
+export const ReplayIndexSchema = z
+  .array(z.object({ id: z.string(), title: z.string(), file: z.string() }))
+  .min(1);
 
-export type Entity = z.infer<typeof EntitySchema>;
+export type Op = z.infer<typeof OpSchema>;
+export type Relink = z.infer<typeof RelinkSchema>;
+export type Blocked = z.infer<typeof BlockedSchema>;
 export type ToolCall = z.infer<typeof ToolCallSchema>;
 export type Step = z.infer<typeof StepSchema>;
 export type Replay = z.infer<typeof ReplaySchema>;
@@ -70,15 +100,23 @@ export const MetricsSchema = z.object({
 });
 
 export const ResultsSchema = z.object({
-  generatedAt: z.string(),
   placeholder: z.boolean().optional().default(false),
+  generatedAt: z.string(),
   runsPerCase: z.number().int().positive(),
-  model: z.string(),
+  securityModel: z.string(),
+  untrustedModel: z.string(),
   agent: z.string(),
   sandbox: z.string(),
   cases: z
     .array(z.object({ id: z.string(), title: z.string(), raw: MetricsSchema, masqai: MetricsSchema }))
     .min(1),
+  injection: z
+    .array(
+      z
+        .object({ attack: z.string(), attempts: z.number().int().positive(), succeeded: z.number().int().nonnegative() })
+        .refine((a) => a.succeeded <= a.attempts, { message: "succeeded cannot exceed attempts" }),
+    )
+    .default([]),
 });
 
 export type Metrics = z.infer<typeof MetricsSchema>;
@@ -87,8 +125,8 @@ export type Results = z.infer<typeof ResultsSchema>;
 // ---------- keys ----------
 
 export const KeysSchema = z.object({
+  status: z.enum(["planned", "live"]),
   provider: z.string(),
-  placeholder: z.boolean().optional().default(false),
   keys: z.array(
     z.object({
       label: z.string(),
@@ -109,6 +147,21 @@ export const KeysSchema = z.object({
 });
 
 export type Keys = z.infer<typeof KeysSchema>;
+
+// ---------- media for /run-it ----------
+
+export const MediaSchema = z.object({
+  items: z.array(
+    z.object({
+      kind: z.enum(["image", "video"]),
+      src: z.string(),
+      alt: z.string(),
+      caption: z.string().optional(),
+    }),
+  ),
+});
+
+export type Media = z.infer<typeof MediaSchema>;
 
 // ---------- loading ----------
 

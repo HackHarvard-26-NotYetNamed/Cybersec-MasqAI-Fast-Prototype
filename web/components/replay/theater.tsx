@@ -6,24 +6,31 @@ import {
   Ban,
   ChevronLeft,
   ChevronRight,
+  EyeOff,
   Laptop,
+  ListChecks,
   Lock,
   Pause,
   Play,
   RadioTower,
   RotateCcw,
   ShieldCheck,
+  ShieldHalf,
   ShieldOff,
+  Sparkles,
   TriangleAlert,
 } from "lucide-react";
 import { ReplayIndexSchema, ReplaySchema, useJson, type Replay, type Step } from "@/lib/data";
-import { CHIP_STYLES, indexReplay, relayCounts, type ChipType, type ReplayIndex } from "@/lib/entities";
+import { CHIP_STYLES, blockLabel, indexReplay, isApplied, relayCounts, sanitizedAsOf, type ChipType, type Counts, type ReplayIndex } from "@/lib/ops";
 import { cn } from "@/lib/utils";
 import { DataError, Loading } from "@/components/site/page-bits";
-import { PlaceholderChip, RestoredMark, SecretMark } from "./annotated-text";
+import { Drawer, DrawerContent, DrawerTitle, DrawerTrigger } from "@/components/ui/drawer";
+import { PlaceholderChip, ReplacedMark, RestoredMark, SecretMark } from "./annotated-text";
+import { DecisionPanel } from "./decision-panel";
 import { StepView, type PaneMode } from "./step-view";
 
 const ucLabel = (id: string) => id.match(/^uc(\d+)/i)?.[0].toUpperCase() ?? id;
+const PANE_HEIGHT = "h-[min(64vh,680px)] min-h-[360px]";
 
 export function ReplayTheater() {
   const index = useJson("/data/replays/index.json", ReplayIndexSchema);
@@ -38,7 +45,7 @@ export function ReplayTheater() {
   if (index.status === "loading") return <Loading label="Loading replays" />;
   if (index.status === "error") return <DataError url={index.url} message={index.message} />;
 
-  const replays = index.data.replays;
+  const replays = index.data;
   const current = replays.find((r) => r.id === picked) ?? replays[0];
   const pick = (id: string) => {
     setPicked(id);
@@ -47,7 +54,7 @@ export function ReplayTheater() {
 
   return (
     <div className="space-y-5">
-      <div role="group" aria-label="Use case" className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+      <div role="group" aria-label="Use case" className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8">
         {replays.map((r) => {
           const active = r.id === current.id;
           return (
@@ -62,7 +69,7 @@ export function ReplayTheater() {
               )}
             >
               <span className="block font-mono text-sm text-muted-foreground">{ucLabel(r.id)}</span>
-              <span className="block text-sm font-medium leading-snug">{r.title}</span>
+              <span className="block text-sm leading-snug font-medium">{r.title}</span>
             </button>
           );
         })}
@@ -80,34 +87,46 @@ function ReplayLoader({ file }: { file: string }) {
 }
 
 function stepDelay(step: Step) {
-  return 2000 + Math.min(2200, (step.raw.length + (step.toolCall?.argsSent.length ?? 0)) * 3);
+  return 2200 + Math.min(2400, (step.raw.length + (step.toolCall?.argsSent.length ?? 0)) * 3) + (step.relinks.length ? 2600 : 0);
 }
 
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
 function caption(step: Step, unprotected: boolean): string {
-  if (step.note) return step.note;
-  if (step.blocked) return "Blocked: the security model is unavailable, so nothing is forwarded.";
-  const secrets = step.entities.filter((e) => e.op !== "collapse");
-  const collapsed = step.entities.filter((e) => e.op === "collapse").length;
+  if (step.blocked) return `Blocked with HTTP ${step.blocked.status}: ${blockLabel(step.blocked.reason)}. Nothing reaches the untrusted model.`;
+  const applied = step.ops.filter(isApplied);
   if (unprotected) {
     if (step.role === "assistant")
       return step.toolCall ? "The model saw the real values, so its tool call contains them too." : "Model response.";
-    return secrets.length
-      ? `Without MasqAI the relay receives all ${secrets.length} sensitive value${secrets.length > 1 ? "s" : ""} verbatim.`
+    return applied.length
+      ? `Without MasqAI the untrusted model receives all ${plural(applied.length, "flagged value")} verbatim.`
       : "Without MasqAI this is forwarded verbatim. Nothing sensitive in this one.";
   }
+  if (step.relinks.length)
+    return `Relink: an earlier masked fragment belongs to a newly found key. ${plural(new Set(step.relinks.flatMap((r) => r.stepsRewritten)).size, "earlier step")} rewritten to the <$…> form; the prompt cache breaks, on purpose.`;
   if (step.role === "assistant") {
     const call = step.toolCall;
     if (call && call.argsSent !== call.argsRestored)
-      return "The model's tool call contains placeholders. MasqAI swaps the real values back in locally, so the command runs on real data.";
+      return "The tool call contains placeholders. MasqAI swaps the real values back in locally, so the command runs on real data.";
     if (call) return "A tool call with nothing to restore: it runs exactly as the model wrote it.";
-    return "Model response. Chat text is not restored, so the agent sees placeholders too: proof the model never had the values.";
+    return "Model response, passed back unmodified. Placeholders in its text stay: proof the model never had the values.";
   }
-  if (!secrets.length && !collapsed) return "Nothing sensitive here: forwarded unchanged.";
-  const missed = secrets.filter((e) => e.missed).length;
-  const parts = [];
-  if (secrets.length) parts.push(`masks ${secrets.length - missed} of ${secrets.length} sensitive values`);
-  if (collapsed) parts.push(`collapses ${collapsed} noisy block${collapsed > 1 ? "s" : ""}`);
-  return `MasqAI ${parts.join(" and ")}.${missed ? ` ${missed} slipped through (marked as leaked).` : ""}`;
+  if (!step.ops.length) return "Nothing sensitive here: forwarded unchanged.";
+  const count = (f: (o: Step["ops"][number]) => boolean) => applied.filter(f).length;
+  const parts = [
+    count((o) => o.source === "detector") && `detectors mask ${count((o) => o.source === "detector")}`,
+    count((o) => o.source === "auto") && `auto masks copy ${count((o) => o.source === "auto")}`,
+    count((o) => o.source === "model" && o.op === "mask") && `the security model masks ${count((o) => o.source === "model" && o.op === "mask")} the rules missed`,
+    count((o) => o.op === "hide") && `hides ${plural(count((o) => o.op === "hide"), "block")} of intel`,
+    count((o) => o.op === "replace") && `replaces ${count((o) => o.op === "replace")} intel detail${count((o) => o.op === "replace") === 1 ? "" : "s"}`,
+  ].filter(Boolean);
+  const notes = [
+    step.ops.some((o) => o.verdict === "vetoed") && "vetoes a wrong auto mask",
+    step.ops.some((o) => o.verdict === "left_as_is") && "leaves a copy inside a longer word alone",
+    step.ops.some((o) => o.verdict === "rejected_invalid") && "fixes an invalid op in the retry round",
+  ].filter(Boolean);
+  const text = parts.join(", ");
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}.${notes.length ? ` The security model also ${notes.join(" and ")}.` : ""}`;
 }
 
 function Player({ replay }: { replay: Replay }) {
@@ -116,7 +135,9 @@ function Player({ replay }: { replay: Replay }) {
   const [i, setI] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [unprotected, setUnprotected] = useState(false);
-  const [mobilePane, setMobilePane] = useState<"agent" | "relay">("relay");
+  const [mobilePane, setMobilePane] = useState<"agent" | "untrusted">("untrusted");
+  // A relink jumps the untrusted pane back to the first rewritten step, then returns.
+  const [relinkFocus, setRelinkFocus] = useState<number | null>(null);
 
   useEffect(() => {
     if (!playing) return;
@@ -127,6 +148,18 @@ function Player({ replay }: { replay: Replay }) {
     }, stepDelay(replay.steps[i]));
     return () => clearTimeout(id);
   }, [playing, i, last, replay]);
+
+  useEffect(() => {
+    const rewritten = replay.steps[i].relinks.flatMap((r) => r.stepsRewritten).filter((s) => s < i);
+    if (!rewritten.length) return;
+    const jump = setTimeout(() => setRelinkFocus(Math.min(...rewritten)), 350);
+    const back = setTimeout(() => setRelinkFocus(null), 3000);
+    return () => {
+      clearTimeout(jump);
+      clearTimeout(back);
+      setRelinkFocus(null);
+    };
+  }, [i, replay]);
 
   const go = (n: number) => {
     setPlaying(false);
@@ -142,7 +175,7 @@ function Player({ replay }: { replay: Replay }) {
   const onKey = useEffectEvent((e: KeyboardEvent) => {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
     const target = e.target as HTMLElement | null;
-    if (target?.closest("input, textarea, select, [contenteditable=true], [role=tab]")) return;
+    if (target?.closest("input, textarea, select, [contenteditable=true], [role=tab], [role=dialog]")) return;
     if (e.key === "ArrowRight") go(i + 1);
     else if (e.key === "ArrowLeft") go(i - 1);
     else if (e.key === " " && !target?.closest("button, a, [role=switch]")) togglePlay();
@@ -171,6 +204,8 @@ function Player({ replay }: { replay: Replay }) {
         </div>
         <UnprotectedSwitch on={unprotected} onChange={setUnprotected} />
       </div>
+
+      <HygieneStrip headers={replay.headersStripped} fields={replay.pseudonymized} />
 
       <div className="rounded-lg border bg-card p-3 sm:p-4">
         <div className="flex flex-wrap items-center gap-2">
@@ -201,36 +236,60 @@ function Player({ replay }: { replay: Replay }) {
         </p>
       </div>
 
-      <div role="tablist" aria-label="Pane" className="grid grid-cols-2 gap-1 rounded-lg border bg-muted p-1 md:hidden">
-        {(["agent", "relay"] as const).map((p) => (
-          <button
-            key={p}
-            role="tab"
-            id={`tab-${p}`}
-            aria-selected={mobilePane === p}
-            aria-controls={`pane-${p}`}
-            onClick={() => setMobilePane(p)}
-            onKeyDown={(e) => {
-              if (e.key === "ArrowLeft" || e.key === "ArrowRight") setMobilePane(p === "agent" ? "relay" : "agent");
-            }}
-            className={cn(
-              "min-h-10 rounded-md text-sm font-medium",
-              mobilePane === p ? "bg-card text-foreground shadow-sm" : "text-muted-foreground",
-            )}
-          >
-            {p === "agent" ? "Agent" : "Relay"}
-          </button>
-        ))}
+      {step.blocked && !unprotected ? (
+        <div
+          role="status"
+          className="flex flex-wrap items-center gap-3 rounded-lg border-2 border-leak/70 bg-leak/10 px-4 py-3 font-mono text-lg font-semibold text-leak"
+        >
+          <Ban aria-hidden className="size-6" />
+          BLOCKED · {step.blocked.status} · {blockLabel(step.blocked.reason)}
+        </div>
+      ) : null}
+
+      <div className="flex items-center gap-2 xl:hidden">
+        <div role="tablist" aria-label="Pane" className="grid flex-1 grid-cols-2 gap-1 rounded-lg border bg-muted p-1 md:hidden">
+          {(["agent", "untrusted"] as const).map((p) => (
+            <button
+              key={p}
+              role="tab"
+              id={`tab-${p}`}
+              aria-selected={mobilePane === p}
+              aria-controls={`pane-${p}`}
+              onClick={() => setMobilePane(p)}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowLeft" || e.key === "ArrowRight") setMobilePane(p === "agent" ? "untrusted" : "agent");
+              }}
+              className={cn(
+                "min-h-10 rounded-md text-sm font-medium",
+                mobilePane === p ? "bg-card text-foreground shadow-sm" : "text-muted-foreground",
+              )}
+            >
+              {p === "agent" ? "Agent" : "Untrusted model"}
+            </button>
+          ))}
+        </div>
+        <Drawer>
+          <DrawerTrigger className="inline-flex min-h-11 items-center gap-2 rounded-lg border bg-card px-3 text-sm font-medium hover:bg-accent md:ml-auto">
+            <ListChecks aria-hidden className="size-4" />
+            Decisions ({step.ops.length + step.relinks.length})
+          </DrawerTrigger>
+          <DrawerContent className="max-h-[80vh]">
+            <DrawerTitle className="sr-only">Decisions for step {i + 1}</DrawerTitle>
+            <div className="flex max-h-[78vh] min-h-0 flex-col">
+              <DecisionPanel step={step} stepNumber={i + 1} index={index} />
+            </div>
+          </DrawerContent>
+        </Drawer>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-[1fr_1fr_320px]">
         <Pane
           id="agent"
           hiddenOnMobile={mobilePane !== "agent"}
           icon={<Laptop aria-hidden className="size-4" />}
           title="What your agent sent"
           subtitle="Raw, on your machine"
-          scrollKey={i}
+          focus={i}
           status={
             <p className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-sm text-muted-foreground">
               <Lock aria-hidden className="size-4" />
@@ -240,22 +299,28 @@ function Player({ replay }: { replay: Replay }) {
         >
           {visible.map((s, n) => (
             <AnimatedStep key={n}>
-              <StepView step={s} mode="agent" index={index} current={n === i} />
+              <StepView step={s} stepIndex={n} mode="agent" index={index} current={n === i} />
             </AnimatedStep>
           ))}
         </Pane>
         <Pane
-          id="relay"
-          hiddenOnMobile={mobilePane !== "relay"}
+          id="untrusted"
+          hiddenOnMobile={mobilePane !== "untrusted"}
           icon={<RadioTower aria-hidden className="size-4" />}
-          title="What the relay saw"
+          title="What the untrusted model saw"
           subtitle={unprotected ? "Without MasqAI" : "Sanitized by MasqAI"}
-          scrollKey={i}
+          focus={relinkFocus ?? i}
           tone={unprotected ? "leak" : undefined}
-          status={<Counter requests={counts.requests} exposed={counts.exposed} />}
+          status={<Counter counts={counts} unprotected={unprotected} />}
         >
-          <RelaySteps visible={visible} current={i} index={index} unprotected={unprotected} />
+          <UntrustedSteps replay={replay} current={i} index={index} unprotected={unprotected} />
         </Pane>
+        {/* Absolutely filled, so the panel matches the panes' height instead of stretching the row. */}
+        <div className="relative hidden xl:block">
+          <div className="absolute inset-0 flex flex-col overflow-hidden rounded-lg border bg-card">
+            <DecisionPanel step={step} stepNumber={i + 1} index={index} />
+          </div>
+        </div>
       </div>
 
       <Legend />
@@ -263,44 +328,52 @@ function Player({ replay }: { replay: Replay }) {
   );
 }
 
-function RelaySteps({
-  visible,
+function UntrustedSteps({
+  replay,
   current,
   index,
   unprotected,
 }: {
-  visible: Step[];
+  replay: Replay;
   current: number;
   index: ReplayIndex;
   unprotected: boolean;
 }) {
-  const mode: PaneMode = unprotected ? "unprotected" : "relay";
-  const shown = visible.map((s, n) => ({ s, n })).filter(({ s }) => unprotected || !s.blocked);
-  const blockedNow = !unprotected && visible[current]?.blocked;
+  const mode: PaneMode = unprotected ? "unprotected" : "untrusted";
+  const visible = replay.steps.slice(0, current + 1).map((s, n) => ({ s, n }));
+  const shown = visible.filter(({ s }) => unprotected || !s.blocked);
+  const blockedNow = !unprotected && replay.steps[current].blocked;
   return (
     <>
-      {shown.map(({ s, n }) => (
-        <AnimatedStep key={n}>
-          <StepView step={s} mode={mode} index={index} current={n === current} />
-        </AnimatedStep>
-      ))}
-      {blockedNow ? (
-        shown.length === 0 ? (
-          <AnimatedStep>
-            <div className="flex min-h-72 flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed border-leak/60 bg-leak/6 p-6 text-center">
-              <Ban aria-hidden className="size-12 text-leak" />
-              <p className="font-mono text-2xl font-bold tracking-tight text-leak">BLOCKED</p>
-              <p className="text-lg font-medium">0 requests reached the relay</p>
-              <p className="max-w-sm text-muted-foreground">
-                The security model is down, so MasqAI fails closed: HTTP 502 to the agent, nothing upstream.
-              </p>
-            </div>
+      {shown.map(({ s, n }) => {
+        const asOf = unprotected ? null : sanitizedAsOf(replay, n, current);
+        return (
+          <AnimatedStep key={n}>
+            <StepView
+              step={s}
+              stepIndex={n}
+              mode={mode}
+              index={index}
+              current={n === current}
+              sanitized={asOf?.text}
+              rewrittenTo={asOf?.rewrittenTo}
+            />
           </AnimatedStep>
-        ) : (
-          <p className="flex items-center gap-2 rounded-lg border border-dashed border-leak/60 p-3 font-medium text-leak">
-            <Ban aria-hidden className="size-4" /> Blocked: this request never reached the relay.
-          </p>
-        )
+        );
+      })}
+      {blockedNow && shown.length === 0 ? (
+        <AnimatedStep>
+          <div className="flex min-h-72 flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed border-leak/60 bg-leak/6 p-6 text-center">
+            <Ban aria-hidden className="size-12 text-leak" />
+            <p className="font-mono text-2xl font-bold tracking-tight text-leak">BLOCKED</p>
+            <p className="text-lg font-medium">0 requests reached the untrusted model</p>
+            <p className="max-w-sm text-muted-foreground">MasqAI fails closed: the agent gets an error, the untrusted model gets nothing.</p>
+          </div>
+        </AnimatedStep>
+      ) : blockedNow ? (
+        <p className="flex items-center gap-2 rounded-lg border border-dashed border-leak/60 p-3 font-medium text-leak">
+          <Ban aria-hidden className="size-4" /> Blocked: this request never reached the untrusted model.
+        </p>
       ) : null}
     </>
   );
@@ -326,7 +399,7 @@ function Pane({
   icon,
   status,
   children,
-  scrollKey,
+  focus,
   hiddenOnMobile,
   tone,
 }: {
@@ -336,22 +409,24 @@ function Pane({
   icon: ReactNode;
   status: ReactNode;
   children: ReactNode;
-  scrollKey: number;
+  /** Step index to keep in view. */
+  focus: number;
   hiddenOnMobile: boolean;
   tone?: "leak";
 }) {
   const scroller = useRef<HTMLDivElement>(null);
-  // Keep the newest step in view inside the pane, without scrolling the page.
+  // Keep the focused step in view inside the pane, without scrolling the page.
   useEffect(() => {
     const el = scroller.current;
-    const target = el?.querySelector<HTMLElement>("[aria-current=step]") ?? (el?.lastElementChild as HTMLElement | null);
+    const target =
+      el?.querySelector<HTMLElement>(`[data-step="${focus}"]`) ?? (el?.lastElementChild as HTMLElement | null);
     if (!el || !target) return;
     // Measured from rects: offsetTop is relative to the animating (transformed) wrapper mid-entrance.
     const box = target.getBoundingClientRect();
     const offset = box.top - el.getBoundingClientRect().top + el.scrollTop;
     const top = box.height > el.clientHeight ? offset - 12 : offset + box.height - el.clientHeight + 12;
     el.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
-  }, [scrollKey]);
+  }, [focus]);
 
   return (
     <section
@@ -378,7 +453,7 @@ function Pane({
         ref={scroller}
         tabIndex={0}
         aria-label={`${title}: transcript`}
-        className="relative h-[min(64vh,680px)] min-h-[360px] space-y-3 overflow-y-auto p-3 sm:p-4"
+        className={cn("relative space-y-3 overflow-y-auto p-3 sm:p-4", PANE_HEIGHT)}
       >
         {children}
       </div>
@@ -386,9 +461,13 @@ function Pane({
   );
 }
 
-function Counter({ requests, exposed }: { requests: number; exposed: number }) {
-  const bad = exposed > 0;
+function Counter({ counts, unprotected }: { counts: Counts; unprotected: boolean }) {
+  const bad = counts.exposed > 0;
   const Icon = bad ? TriangleAlert : ShieldCheck;
+  const text =
+    !unprotected && counts.requests === 0 && counts.blocked > 0
+      ? "0 requests reached the untrusted model"
+      : `Untrusted model received ${plural(counts.requests, "request")} · ${plural(counts.exposed, "value")} exposed`;
   return (
     <p
       className={cn(
@@ -396,9 +475,48 @@ function Counter({ requests, exposed }: { requests: number; exposed: number }) {
         bad ? "border-leak/50 bg-leak/10 text-leak" : "border-restored/50 bg-restored/10 text-restored",
       )}
     >
-      <Icon aria-hidden className="size-4" />
-      Relay received {requests} request{requests === 1 ? "" : "s"} · {exposed} secret{exposed === 1 ? "" : "s"} exposed
+      <Icon aria-hidden className="size-4 shrink-0" />
+      {text}
     </p>
+  );
+}
+
+function HygieneStrip({ headers, fields }: { headers: string[]; fields: string[] }) {
+  const Chip = ({ children }: { children: string }) => (
+    <li className="rounded border px-1.5 font-mono text-sm text-muted-foreground line-through decoration-2">
+      <span className="sr-only">removed: </span>
+      {children}
+    </li>
+  );
+  return (
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border bg-card px-4 py-3 text-sm">
+      <span className="flex items-center gap-2 font-medium">
+        <ShieldHalf aria-hidden className="size-4" /> Request hygiene
+      </span>
+      {headers.length === 0 && fields.length === 0 ? (
+        <span className="text-muted-foreground">Nothing was forwarded, so nothing needed stripping.</span>
+      ) : (
+        <>
+          <span className="flex flex-wrap items-center gap-1.5">
+            <span className="text-muted-foreground">Headers stripped:</span>
+            <ul className="flex flex-wrap gap-1.5">
+              {headers.map((h) => (
+                <Chip key={h}>{h}</Chip>
+              ))}
+            </ul>
+          </span>
+          <span className="flex flex-wrap items-center gap-1.5">
+            <span className="text-muted-foreground">Pseudonymized:</span>
+            <ul className="flex flex-wrap gap-1.5">
+              {fields.map((f) => (
+                <Chip key={f}>{f}</Chip>
+              ))}
+            </ul>
+            <span className="text-muted-foreground">→ masq-…</span>
+          </span>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -414,19 +532,8 @@ function UnprotectedSwitch({ on, onChange }: { on: boolean; onChange: (v: boolea
         on ? "border-leak/60 bg-leak/10" : "bg-background hover:bg-accent",
       )}
     >
-      <span
-        aria-hidden
-        className={cn(
-          "relative h-6 w-11 rounded-full border transition-colors",
-          on ? "border-leak bg-leak/80" : "border-input bg-muted",
-        )}
-      >
-        <span
-          className={cn(
-            "absolute top-0.5 size-[18px] rounded-full bg-background shadow transition-[left]",
-            on ? "left-[22px]" : "left-0.5",
-          )}
-        />
+      <span aria-hidden className={cn("relative h-6 w-11 rounded-full border transition-colors", on ? "border-leak bg-leak/80" : "border-input bg-muted")}>
+        <span className={cn("absolute top-0.5 size-4.5 rounded-full bg-background shadow transition-[left]", on ? "left-5.5" : "left-0.5")} />
       </span>
       <span>
         <span className="flex items-center gap-1.5 font-medium">
@@ -473,7 +580,7 @@ function Timeline({ steps, current, onPick }: { steps: Step[]; current: number; 
   return (
     <ol aria-label="Steps" className="mt-3 flex gap-1">
       {steps.map((s, n) => {
-        const label = `Step ${n + 1}: ${s.role === "user" ? "prompt" : s.role === "tool" ? "tool output" : "model response"}${s.blocked ? ", blocked" : ""}`;
+        const label = `Step ${n + 1}: ${s.role === "user" ? "prompt" : s.role === "tool" ? "tool output" : s.role === "system" ? "system prompt" : "model response"}${s.blocked ? ", blocked" : ""}${s.relinks.length ? ", relink" : ""}`;
         return (
           <li key={n} className="flex-1">
             <button
@@ -489,11 +596,13 @@ function Timeline({ steps, current, onPick }: { steps: Step[]; current: number; 
                   "h-2 w-full rounded-full transition-colors",
                   s.blocked
                     ? "bg-leak/70"
-                    : n <= current
-                      ? s.role === "assistant"
-                        ? "bg-foreground/45"
-                        : "bg-foreground"
-                      : "bg-foreground/15 group-hover:bg-foreground/30",
+                    : s.relinks.length
+                      ? "bg-model"
+                      : n <= current
+                        ? s.role === "assistant"
+                          ? "bg-foreground/45"
+                          : "bg-foreground"
+                        : "bg-foreground/15 group-hover:bg-foreground/30",
                   n === current && "h-3 ring-2 ring-ring ring-offset-2 ring-offset-card",
                 )}
               />
@@ -511,23 +620,32 @@ function Legend() {
     <div className="rounded-lg border bg-card p-4">
       <h3 className="mb-2 text-sm font-medium text-muted-foreground">Legend</h3>
       <ul className="flex flex-wrap items-center gap-x-5 gap-y-2 font-mono text-[15px]">
-        <li className="flex items-center gap-2">
-          <SecretMark text="real value" type="KEY" />
+        <li>
+          <SecretMark text="raw secret" type="KEY" />
         </li>
-        <li className="flex items-center gap-2">
+        <li>
           <SecretMark text="leaked" type="KEY" leaked />
         </li>
         {types.map((t) => (
           <li key={t}>
-            <PlaceholderChip placeholder={`<${t}_…>`} type={t} />
+            <PlaceholderChip placeholder={`<${t}_…>`} type={t} alias={false} />
             <span className="ml-1.5 font-sans text-sm text-muted-foreground">{CHIP_STYLES[t].label} masked</span>
           </li>
         ))}
-        <li className="flex items-center gap-1.5 font-sans text-sm text-collapsed">
-          <span aria-hidden className="inline-block h-4 w-6 rounded border border-dashed border-collapsed/60 bg-collapsed/15" />
-          Collapsed (lossy summary)
+        <li>
+          <PlaceholderChip placeholder="<$KEY_…>" type="KEY" alias />
+          <span className="ml-1.5 font-sans text-sm text-muted-foreground">alias (partial form)</span>
         </li>
-        <li className="flex items-center gap-2">
+        <li className="flex items-center gap-1.5 font-sans text-sm text-model">
+          <Sparkles aria-hidden className="size-4" /> found by the security model
+        </li>
+        <li className="flex items-center gap-1.5 font-sans text-sm text-collapsed">
+          <EyeOff aria-hidden className="size-4" /> intel hidden
+        </li>
+        <li>
+          <ReplacedMark text="intel replaced" reason="Legend example: a detail swapped for a neutral word." />
+        </li>
+        <li>
           <RestoredMark text="restored locally" />
         </li>
       </ul>

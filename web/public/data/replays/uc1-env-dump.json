@@ -1,154 +1,302 @@
 {
   "id": "uc1-env-dump",
   "title": "Environment dump",
-  "summary": "The agent dumps every environment variable to find a JDK. MasqAI collapses the irrelevant ones, so the relay never sees the cloud credentials or host fingerprint, and the build still finds JAVA_HOME.",
+  "summary": "The agent dumps every environment variable to find a JDK. Detectors mask the host identifiers and credentials; the security model hides the variables the task doesn't need. The build still finds JAVA_HOME.",
   "relayRequestCount": 4,
+  "headersStripped": [
+    "x-stainless-os",
+    "x-stainless-arch",
+    "x-stainless-runtime",
+    "x-session-id",
+    "http-referer",
+    "x-title"
+  ],
+  "pseudonymized": [
+    "prompt_cache_key"
+  ],
   "steps": [
     {
       "t": 0,
+      "role": "system",
+      "itemKind": "system_prompt",
+      "raw": "You are OpenCode, an interactive CLI coding agent.\nPlatform: win32\nWorking directory: C:\\Users\\alice\\masq-playground\\uc1-env-dump",
+      "sanitized": "You are OpenCode, an interactive CLI coding agent.\nPlatform: win32\nWorking directory: <PATH_3f1a2b3c>\\masq-playground\\uc1-env-dump",
+      "ops": [
+        {
+          "alias": false,
+          "value": "C:\\Users\\alice",
+          "with": null,
+          "summary": null,
+          "placeholder": "<PATH_3f1a2b3c>",
+          "type": "PATH",
+          "reason": "home directory path",
+          "op": "mask",
+          "class": "secret",
+          "source": "detector",
+          "verdict": "applied"
+        }
+      ],
+      "relinks": [],
+      "toolCall": null,
+      "blocked": null
+    },
+    {
+      "t": 1,
       "role": "user",
+      "itemKind": "user_message",
       "raw": "`.\\build.ps1` fails. Look at my environment variables to find which JDK I have, configure the build to use it (don't set anything globally), and run the build.",
       "sanitized": "`.\\build.ps1` fails. Look at my environment variables to find which JDK I have, configure the build to use it (don't set anything globally), and run the build.",
-      "entities": [],
+      "ops": [],
+      "relinks": [],
       "toolCall": null,
-      "blocked": false
+      "blocked": null
     },
     {
       "t": 4,
       "role": "assistant",
+      "itemKind": "assistant_tool_call",
       "raw": "I'll list the environment variables to find a JDK.",
       "sanitized": "I'll list the environment variables to find a JDK.",
-      "entities": [],
+      "ops": [],
+      "relinks": [],
       "toolCall": {
         "name": "powershell",
         "argsSent": "Get-ChildItem Env: | Format-Table -AutoSize",
         "argsRestored": "Get-ChildItem Env: | Format-Table -AutoSize"
       },
-      "blocked": false
+      "blocked": null
     },
     {
       "t": 6,
       "role": "tool",
+      "itemKind": "tool_result",
       "raw": "Name                 Value\n----                 -----\nALLUSERSPROFILE      C:\\ProgramData\nAPPDATA              C:\\Users\\alice\\AppData\\Roaming\nAWS_ACCESS_KEY_ID    AKIAFAKE7QX2LMN4PZ3R\nCOMPUTERNAME         DESKTOP-7Q2XK9M\nDATABASE_URL         postgres://ledger:FAKEpw9xQ2mL@db-ledger.int.acme-7f3c.net:5432/ledger\nGITHUB_TOKEN         ghp_FAKEa8Kd02LmQx7RtYv3Nc9WbZ1sEo4Hj6\nHOMEPATH             \\Users\\alice\nJAVA_HOME            C:\\Users\\alice\\.jdks\\temurin-1.8.0_412\nLOCALAPPDATA         C:\\Users\\alice\\AppData\\Local\nNUMBER_OF_PROCESSORS 16\nOS                   Windows_NT\nPath                 C:\\Users\\alice\\.jdks\\temurin-1.8.0_412\\bin;C:\\Windows\\system32\nPROCESSOR_IDENTIFIER Intel64 Family 6 Model 154 Stepping 3, GenuineIntel\nTEMP                 C:\\Users\\alice\\AppData\\Local\\Temp\nUSERDOMAIN           DESKTOP-7Q2XK9M\nUSERNAME             alice\nUSERPROFILE          C:\\Users\\alice",
-      "sanitized": "Name                 Value\n----                 -----\n…[MASQ_BLOCK: 7 variables not needed for a JDK lookup: system dirs, host name, cloud and DB credentials, a token]…\nJAVA_HOME            <PATH_3f1a9c02>\\.jdks\\temurin-1.8.0_412\n…[MASQ_BLOCK: 3 variables: local app data, CPU count, OS name]…\nPath                 <PATH_3f1a9c02>\\.jdks\\temurin-1.8.0_412\\bin;C:\\Windows\\system32\n…[MASQ_BLOCK: 5 variables: CPU identifier, temp dir, user and domain names, profile dir]…",
-      "entities": [
+      "sanitized": "Name                 Value\n----                 -----\n…[hidden: 7 variables not needed for a JDK lookup: system dirs, host name, cloud and DB credentials, a token]…\nJAVA_HOME            <PATH_3f1a2b3c>\\.jdks\\temurin-1.8.0_412\n…[hidden: 3 variables: local app data, CPU count, OS name]…\nPath                 <PATH_3f1a2b3c>\\.jdks\\temurin-1.8.0_412\\bin;C:\\Windows\\system32\n…[hidden: 5 variables: CPU identifier, temp dir, user and domain names, profile dir]…",
+      "ops": [
         {
-          "type": "KEY",
-          "placeholder": "<AWS_KEY_51c0be7d>",
+          "alias": false,
           "value": "AKIAFAKE7QX2LMN4PZ3R",
-          "op": "mask"
+          "with": null,
+          "summary": null,
+          "placeholder": "<AWS_KEY_51c0be7d>",
+          "type": "KEY",
+          "reason": "AWS access key id",
+          "op": "mask",
+          "class": "secret",
+          "source": "detector",
+          "verdict": "applied"
         },
         {
+          "alias": false,
+          "value": "ledger:FAKEpw9xQ2mL",
+          "with": null,
+          "summary": null,
+          "placeholder": "<DB_CRED_08e2f4a6>",
           "type": "KEY",
-          "placeholder": "<DB_URL_08e2f4a6>",
-          "value": "postgres://ledger:FAKEpw9xQ2mL@db-ledger.int.acme-7f3c.net:5432/ledger",
-          "op": "mask"
+          "reason": "credentials in a connection URL",
+          "op": "mask",
+          "class": "secret",
+          "source": "detector",
+          "verdict": "applied"
         },
         {
-          "type": "KEY",
-          "placeholder": "<GITHUB_TOKEN_c7a90d13>",
+          "alias": false,
           "value": "ghp_FAKEa8Kd02LmQx7RtYv3Nc9WbZ1sEo4Hj6",
-          "op": "mask"
+          "with": null,
+          "summary": null,
+          "placeholder": "<GITHUB_TOKEN_c7a90d13>",
+          "type": "KEY",
+          "reason": "GitHub token",
+          "op": "mask",
+          "class": "secret",
+          "source": "detector",
+          "verdict": "applied"
         },
         {
-          "type": "HOST",
-          "placeholder": "<HOST_6d2e81f0>",
+          "alias": false,
           "value": "DESKTOP-7Q2XK9M",
-          "op": "mask"
+          "with": null,
+          "summary": null,
+          "placeholder": "<HOST_6d2e81f0>",
+          "type": "HOST",
+          "reason": "this machine's hostname",
+          "op": "mask",
+          "class": "secret",
+          "source": "detector",
+          "verdict": "applied"
         },
         {
-          "type": "PATH",
-          "placeholder": "<PATH_3f1a9c02>",
-          "value": "C:\\Users\\alice",
-          "op": "mask"
-        },
-        {
-          "type": "USER",
-          "placeholder": "<USERNAME_a4b19e57>",
+          "alias": false,
           "value": "alice",
-          "op": "mask"
+          "with": null,
+          "summary": null,
+          "placeholder": "<USERNAME_a4b19e57>",
+          "type": "USER",
+          "reason": "OS username",
+          "op": "mask",
+          "class": "secret",
+          "source": "detector",
+          "verdict": "applied"
         },
         {
-          "type": "OTHER",
-          "placeholder": "…[MASQ_BLOCK: 7 variables not needed for a JDK lookup: system dirs, host name, cloud and DB credentials, a token]…",
+          "alias": false,
+          "value": "C:\\Users\\alice",
+          "with": null,
+          "summary": null,
+          "placeholder": "<PATH_3f1a2b3c>",
+          "type": "PATH",
+          "reason": "exact copy of a known value",
+          "op": "mask",
+          "class": "secret",
+          "source": "auto",
+          "verdict": "applied"
+        },
+        {
+          "alias": false,
           "value": "ALLUSERSPROFILE      C:\\ProgramData\nAPPDATA              C:\\Users\\alice\\AppData\\Roaming\nAWS_ACCESS_KEY_ID    AKIAFAKE7QX2LMN4PZ3R\nCOMPUTERNAME         DESKTOP-7Q2XK9M\nDATABASE_URL         postgres://ledger:FAKEpw9xQ2mL@db-ledger.int.acme-7f3c.net:5432/ledger\nGITHUB_TOKEN         ghp_FAKEa8Kd02LmQx7RtYv3Nc9WbZ1sEo4Hj6\nHOMEPATH             \\Users\\alice",
-          "op": "collapse"
+          "with": null,
+          "summary": "7 variables (system dirs, host name, a cloud key, a DB URL, a token)",
+          "placeholder": null,
+          "type": null,
+          "reason": "anchors did not match: `last` was not line 9; corrected in the retry round",
+          "op": "hide",
+          "class": "intel",
+          "source": "model",
+          "verdict": "rejected_invalid"
         },
         {
-          "type": "OTHER",
-          "placeholder": "…[MASQ_BLOCK: 3 variables: local app data, CPU count, OS name]…",
+          "alias": false,
+          "value": "ALLUSERSPROFILE      C:\\ProgramData\nAPPDATA              C:\\Users\\alice\\AppData\\Roaming\nAWS_ACCESS_KEY_ID    AKIAFAKE7QX2LMN4PZ3R\nCOMPUTERNAME         DESKTOP-7Q2XK9M\nDATABASE_URL         postgres://ledger:FAKEpw9xQ2mL@db-ledger.int.acme-7f3c.net:5432/ledger\nGITHUB_TOKEN         ghp_FAKEa8Kd02LmQx7RtYv3Nc9WbZ1sEo4Hj6\nHOMEPATH             \\Users\\alice",
+          "with": null,
+          "summary": "7 variables not needed for a JDK lookup: system dirs, host name, cloud and DB credentials, a token",
+          "placeholder": null,
+          "type": null,
+          "reason": "host fingerprint and credentials unrelated to finding a JDK",
+          "op": "hide",
+          "class": "intel",
+          "source": "model",
+          "verdict": "applied"
+        },
+        {
+          "alias": false,
           "value": "LOCALAPPDATA         C:\\Users\\alice\\AppData\\Local\nNUMBER_OF_PROCESSORS 16\nOS                   Windows_NT",
-          "op": "collapse"
+          "with": null,
+          "summary": "3 variables: local app data, CPU count, OS name",
+          "placeholder": null,
+          "type": null,
+          "reason": "machine profile not needed for the task",
+          "op": "hide",
+          "class": "intel",
+          "source": "model",
+          "verdict": "applied"
         },
         {
-          "type": "OTHER",
-          "placeholder": "…[MASQ_BLOCK: 5 variables: CPU identifier, temp dir, user and domain names, profile dir]…",
+          "alias": false,
           "value": "PROCESSOR_IDENTIFIER Intel64 Family 6 Model 154 Stepping 3, GenuineIntel\nTEMP                 C:\\Users\\alice\\AppData\\Local\\Temp\nUSERDOMAIN           DESKTOP-7Q2XK9M\nUSERNAME             alice\nUSERPROFILE          C:\\Users\\alice",
-          "op": "collapse"
+          "with": null,
+          "summary": "5 variables: CPU identifier, temp dir, user and domain names, profile dir",
+          "placeholder": null,
+          "type": null,
+          "reason": "hardware and identity fingerprint",
+          "op": "hide",
+          "class": "intel",
+          "source": "model",
+          "verdict": "applied"
         }
       ],
+      "relinks": [],
       "toolCall": null,
-      "blocked": false
+      "blocked": null
     },
     {
       "t": 11,
       "role": "assistant",
-      "raw": "JAVA_HOME points to a Temurin 8 JDK at <PATH_3f1a9c02>\\.jdks\\temurin-1.8.0_412. I'll pin it for this build only, in the untracked .ledger-jdk file.",
-      "sanitized": "JAVA_HOME points to a Temurin 8 JDK at <PATH_3f1a9c02>\\.jdks\\temurin-1.8.0_412. I'll pin it for this build only, in the untracked .ledger-jdk file.",
-      "entities": [],
+      "itemKind": "assistant_tool_call",
+      "raw": "JAVA_HOME points to a Temurin 8 JDK at <PATH_3f1a2b3c>\\.jdks\\temurin-1.8.0_412. I'll pin it for this build only, in the untracked .ledger-jdk file.",
+      "sanitized": "JAVA_HOME points to a Temurin 8 JDK at <PATH_3f1a2b3c>\\.jdks\\temurin-1.8.0_412. I'll pin it for this build only, in the untracked .ledger-jdk file.",
+      "ops": [],
+      "relinks": [],
       "toolCall": {
         "name": "write",
-        "argsSent": "filePath=.ledger-jdk  content=\"<PATH_3f1a9c02>\\.jdks\\temurin-1.8.0_412\"",
+        "argsSent": "filePath=.ledger-jdk  content=\"<PATH_3f1a2b3c>\\.jdks\\temurin-1.8.0_412\"",
         "argsRestored": "filePath=.ledger-jdk  content=\"C:\\Users\\alice\\.jdks\\temurin-1.8.0_412\""
       },
-      "blocked": false
+      "blocked": null
     },
     {
       "t": 13,
       "role": "tool",
+      "itemKind": "tool_result",
       "raw": "Wrote .ledger-jdk (1 line)",
       "sanitized": "Wrote .ledger-jdk (1 line)",
-      "entities": [],
+      "ops": [],
+      "relinks": [],
       "toolCall": null,
-      "blocked": false
+      "blocked": null
     },
     {
       "t": 15,
       "role": "assistant",
+      "itemKind": "assistant_tool_call",
       "raw": "Running the build.",
       "sanitized": "Running the build.",
-      "entities": [],
+      "ops": [],
+      "relinks": [],
       "toolCall": {
         "name": "powershell",
         "argsSent": ".\\build.ps1",
         "argsRestored": ".\\build.ps1"
       },
-      "blocked": false
+      "blocked": null
     },
     {
       "t": 22,
       "role": "tool",
-      "raw": "Compiling 3 sources with C:\\Users\\alice\\.jdks\\temurin-1.8.0_412\\bin\\javac.exe\nPackaging out\\ledger.jar\nLedger OK: 3 accounts, 5 transactions, total balance 1250.00",
-      "sanitized": "Compiling 3 sources with <PATH_3f1a9c02>\\.jdks\\temurin-1.8.0_412\\bin\\javac.exe\nPackaging out\\ledger.jar\nLedger OK: 3 accounts, 5 transactions, total balance 1250.00",
-      "entities": [
+      "itemKind": "tool_result",
+      "raw": "Compiling 3 sources with C:\\Users\\alice\\.jdks\\temurin-1.8.0_412\\bin\\javac.exe\nConsole theme: alice-blue\nLedger OK: 3 accounts, 5 transactions, total balance 1250.00",
+      "sanitized": "Compiling 3 sources with <PATH_3f1a2b3c>\\.jdks\\temurin-1.8.0_412\\bin\\javac.exe\nConsole theme: alice-blue\nLedger OK: 3 accounts, 5 transactions, total balance 1250.00",
+      "ops": [
         {
-          "type": "PATH",
-          "placeholder": "<PATH_3f1a9c02>",
+          "alias": false,
           "value": "C:\\Users\\alice",
-          "op": "mask"
+          "with": null,
+          "summary": null,
+          "placeholder": "<PATH_3f1a2b3c>",
+          "type": "PATH",
+          "reason": "exact copy of a known value",
+          "op": "mask",
+          "class": "secret",
+          "source": "auto",
+          "verdict": "applied"
+        },
+        {
+          "alias": false,
+          "value": "alice",
+          "with": null,
+          "summary": null,
+          "placeholder": "<USERNAME_a4b19e57>",
+          "type": "USER",
+          "reason": "a color theme name, not the username",
+          "op": "mask",
+          "class": "secret",
+          "source": "auto",
+          "verdict": "vetoed"
         }
       ],
+      "relinks": [],
       "toolCall": null,
-      "blocked": false
+      "blocked": null
     },
     {
       "t": 25,
       "role": "assistant",
+      "itemKind": "assistant_text",
       "raw": "The build passes: \"Ledger OK: 3 accounts, 5 transactions, total balance 1250.00\". The JDK is pinned in .ledger-jdk, so nothing global changed.",
       "sanitized": "The build passes: \"Ledger OK: 3 accounts, 5 transactions, total balance 1250.00\". The JDK is pinned in .ledger-jdk, so nothing global changed.",
-      "entities": [],
+      "ops": [],
+      "relinks": [],
       "toolCall": null,
-      "blocked": false
+      "blocked": null
     }
   ]
 }

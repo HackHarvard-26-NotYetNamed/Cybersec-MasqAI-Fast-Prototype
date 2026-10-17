@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Laptop, RadioTower } from "lucide-react";
 import { PlaceholderChip, SecretMark } from "@/components/replay/annotated-text";
-import type { ChipType } from "@/lib/entities";
+import type { ChipType } from "@/lib/ops";
 
 type Seg = string | { value: string; placeholder: string; type: ChipType };
 

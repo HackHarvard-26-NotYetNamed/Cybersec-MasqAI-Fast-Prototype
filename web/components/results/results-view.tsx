@@ -110,7 +110,7 @@ function ResultsBody({ data }: { data: Results }) {
           </h2>
           <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-6 gap-y-2">
             <Row k="Runs per case" v={String(data.runsPerCase)} />
-            <Row k="Security model" v={data.model} />
+            <Row k="Security model" v={data.securityModel} />
             <Row k="Agent" v={data.agent} />
             <Row k="Sandbox provider" v={data.sandbox} />
             <Row k="Date" v={formatDate(data.generatedAt)} />

@@ -1,0 +1,24 @@
+{
+  "id": "uc7-unknown-content",
+  "title": "Unknown content type",
+  "summary": "The agent attaches a screenshot in OpenAI format. MasqAI can't inspect an image, so it refuses the request before a session or trace exists, rather than forwarding it unread.",
+  "relayRequestCount": 0,
+  "headersStripped": [],
+  "pseudonymized": [],
+  "steps": [
+    {
+      "t": 0,
+      "role": "user",
+      "itemKind": "user_message",
+      "raw": "What does the error in this screenshot mean?\n\n[messages[0].content[1] · image_url · image/png · 182 KB · not inspected]",
+      "sanitized": "",
+      "ops": [],
+      "relinks": [],
+      "toolCall": null,
+      "blocked": {
+        "reason": "unknown_content_type",
+        "status": 422
+      }
+    }
+  ]
+}

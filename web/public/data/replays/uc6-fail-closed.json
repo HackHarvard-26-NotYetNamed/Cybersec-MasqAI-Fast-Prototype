@@ -1,77 +1,142 @@
 {
   "id": "uc6-fail-closed",
   "title": "Fail closed",
-  "summary": "The local security model goes down mid-session. Every request is blocked with HTTP 502 and nothing reaches the relay: context is never sent raw.",
+  "summary": "The security model goes down mid-session. Detectors still run, but without the security model's verdict nothing is forwarded: every request fails closed with HTTP 502.",
   "relayRequestCount": 0,
+  "headersStripped": [
+    "x-stainless-os",
+    "x-stainless-arch",
+    "x-stainless-runtime",
+    "x-session-id",
+    "http-referer",
+    "x-title"
+  ],
+  "pseudonymized": [
+    "prompt_cache_key"
+  ],
   "steps": [
     {
       "t": 0,
       "role": "user",
-      "raw": "system: You are OpenCode. Platform: win32. Host: DESKTOP-7Q2XK9M.\nsystem: Working directory: C:\\Users\\alice\\masq-playground\\uc6-fail-closed\n\n[earlier in this session]\ntool · bash: python -m unittest discover -s tests -v\n  Ran 3 tests in 0.001s: OK\n\nuser: Now read deploy/README.md and summarise how the docs get deployed.",
+      "itemKind": "user_message",
+      "raw": "Platform: win32. Host: DESKTOP-7Q2XK9M.\nWorking directory: C:\\Users\\alice\\masq-playground\\uc6-fail-closed\n\n[earlier in this session] tests: Ran 3 tests in 0.001s: OK\n\nNow read deploy/README.md and summarise how the docs get deployed.",
       "sanitized": "",
-      "entities": [
+      "ops": [
         {
-          "type": "HOST",
-          "placeholder": "<HOST_6d2e81f0>",
+          "alias": false,
           "value": "DESKTOP-7Q2XK9M",
-          "op": "mask"
+          "with": null,
+          "summary": null,
+          "placeholder": "<HOST_6d2e81f0>",
+          "type": "HOST",
+          "reason": "this machine's hostname",
+          "op": "mask",
+          "class": "secret",
+          "source": "detector",
+          "verdict": "applied"
         },
         {
-          "type": "PATH",
-          "placeholder": "<PATH_3f1a9c02>",
+          "alias": false,
           "value": "C:\\Users\\alice",
-          "op": "mask"
+          "with": null,
+          "summary": null,
+          "placeholder": "<PATH_3f1a2b3c>",
+          "type": "PATH",
+          "reason": "home directory path",
+          "op": "mask",
+          "class": "secret",
+          "source": "detector",
+          "verdict": "applied"
         }
       ],
+      "relinks": [],
       "toolCall": null,
-      "blocked": true,
-      "note": "Ollama was stopped: the security model is unreachable. The gateway answers HTTP 502 masqai_sanitization_error instead of forwarding."
+      "blocked": {
+        "reason": "security_model_failed",
+        "status": 502
+      }
     },
     {
       "t": 4,
       "role": "user",
-      "raw": "system: You are OpenCode. Platform: win32. Host: DESKTOP-7Q2XK9M.\nsystem: Working directory: C:\\Users\\alice\\masq-playground\\uc6-fail-closed\n\n[earlier in this session]\ntool · bash: python -m unittest discover -s tests -v\n  Ran 3 tests in 0.001s: OK\n\nuser: Now read deploy/README.md and summarise how the docs get deployed.\n\n(retry 1 of 2)",
+      "itemKind": "user_message",
+      "raw": "Platform: win32. Host: DESKTOP-7Q2XK9M.\nWorking directory: C:\\Users\\alice\\masq-playground\\uc6-fail-closed\n\n[earlier in this session] tests: Ran 3 tests in 0.001s: OK\n\nNow read deploy/README.md and summarise how the docs get deployed.\n\n(retry 1 of 2)",
       "sanitized": "",
-      "entities": [
+      "ops": [
         {
-          "type": "HOST",
-          "placeholder": "<HOST_6d2e81f0>",
+          "alias": false,
           "value": "DESKTOP-7Q2XK9M",
-          "op": "mask"
+          "with": null,
+          "summary": null,
+          "placeholder": "<HOST_6d2e81f0>",
+          "type": "HOST",
+          "reason": "this machine's hostname",
+          "op": "mask",
+          "class": "secret",
+          "source": "detector",
+          "verdict": "applied"
         },
         {
-          "type": "PATH",
-          "placeholder": "<PATH_3f1a9c02>",
+          "alias": false,
           "value": "C:\\Users\\alice",
-          "op": "mask"
+          "with": null,
+          "summary": null,
+          "placeholder": "<PATH_3f1a2b3c>",
+          "type": "PATH",
+          "reason": "home directory path",
+          "op": "mask",
+          "class": "secret",
+          "source": "detector",
+          "verdict": "applied"
         }
       ],
+      "relinks": [],
       "toolCall": null,
-      "blocked": true,
-      "note": "The agent retries. Still no security model, still blocked."
+      "blocked": {
+        "reason": "security_model_failed",
+        "status": 502
+      }
     },
     {
       "t": 9,
       "role": "user",
-      "raw": "system: You are OpenCode. Platform: win32. Host: DESKTOP-7Q2XK9M.\nsystem: Working directory: C:\\Users\\alice\\masq-playground\\uc6-fail-closed\n\n[earlier in this session]\ntool · bash: python -m unittest discover -s tests -v\n  Ran 3 tests in 0.001s: OK\n\nuser: Now read deploy/README.md and summarise how the docs get deployed.\n\n(retry 2 of 2)",
+      "itemKind": "user_message",
+      "raw": "Platform: win32. Host: DESKTOP-7Q2XK9M.\nWorking directory: C:\\Users\\alice\\masq-playground\\uc6-fail-closed\n\n[earlier in this session] tests: Ran 3 tests in 0.001s: OK\n\nNow read deploy/README.md and summarise how the docs get deployed.\n\n(retry 2 of 2)",
       "sanitized": "",
-      "entities": [
+      "ops": [
         {
-          "type": "HOST",
-          "placeholder": "<HOST_6d2e81f0>",
+          "alias": false,
           "value": "DESKTOP-7Q2XK9M",
-          "op": "mask"
+          "with": null,
+          "summary": null,
+          "placeholder": "<HOST_6d2e81f0>",
+          "type": "HOST",
+          "reason": "this machine's hostname",
+          "op": "mask",
+          "class": "secret",
+          "source": "detector",
+          "verdict": "applied"
         },
         {
-          "type": "PATH",
-          "placeholder": "<PATH_3f1a9c02>",
+          "alias": false,
           "value": "C:\\Users\\alice",
-          "op": "mask"
+          "with": null,
+          "summary": null,
+          "placeholder": "<PATH_3f1a2b3c>",
+          "type": "PATH",
+          "reason": "home directory path",
+          "op": "mask",
+          "class": "secret",
+          "source": "detector",
+          "verdict": "applied"
         }
       ],
+      "relinks": [],
       "toolCall": null,
-      "blocked": true,
-      "note": "The agent gives up and shows masqai_sanitization_error. The relay received nothing."
+      "blocked": {
+        "reason": "security_model_failed",
+        "status": 502
+      }
     }
   ]
 }

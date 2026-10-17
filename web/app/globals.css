@@ -31,7 +31,9 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) * 1.4);
 
-  /* Meaningful colors. Always paired with an icon or a label in the UI. */
+  /* Meaningful colors. Always paired with an icon or a label in the UI.
+     leak = raw secret / leaked, ent-* = masked by type, replaced = intel replaced (dashed),
+     collapsed = intel hidden, restored = restored locally, model = found by the security model. */
   --color-leak: var(--leak);
   --color-restored: var(--restored);
   --color-collapsed: var(--collapsed);
@@ -41,6 +43,8 @@
   --color-ent-host: var(--ent-host);
   --color-ent-user: var(--ent-user);
   --color-ent-other: var(--ent-other);
+  --color-replaced: var(--replaced);
+  --color-model: var(--model);
   --color-series-raw: var(--series-raw);
   --color-series-masq: var(--series-masq);
 }
@@ -70,11 +74,13 @@
   --restored: #0f632f;
   --collapsed: #5f6670;
   --ent-path: #1d4ed8;
-  --ent-key: #93580a;
-  --ent-email: #7e22ce;
+  --ent-key: #a8430a;
+  --ent-email: #3f6a0b;
   --ent-host: #0e6b82;
   --ent-user: #be185d;
   --ent-other: #525252;
+  --replaced: #8a3f05;
+  --model: #6d28d9;
   --series-raw: #eb6834;
   --series-masq: #2a78d6;
 }
@@ -103,11 +109,13 @@
   --restored: #4ade80;
   --collapsed: #98a1ab;
   --ent-path: #6aa8ff;
-  --ent-key: #fbbf24;
-  --ent-email: #c99bff;
+  --ent-key: #ff9d4d;
+  --ent-email: #a3e635;
   --ent-host: #2fd4ee;
   --ent-user: #f77fbf;
   --ent-other: #b0b0b0;
+  --replaced: #fbbf24;
+  --model: #b79cff;
   --series-raw: #d95926;
   --series-masq: #3987e5;
 }

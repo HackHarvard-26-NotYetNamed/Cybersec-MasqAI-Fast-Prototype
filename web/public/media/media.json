@@ -1,0 +1,4 @@
+{
+  "_comment": "Screenshots or short looping videos of the gateway's built-in GUI, shown on /run-it. Put files next to this one and list them here, e.g. { \"kind\": \"video\", \"src\": \"/media/gui-context.webm\", \"alt\": \"...\" }. Synthetic playground data only.",
+  "items": []
+}
