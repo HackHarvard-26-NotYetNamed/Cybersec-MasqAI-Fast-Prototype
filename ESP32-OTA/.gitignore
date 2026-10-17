@@ -1,0 +1,8 @@
+# Device-specific Wi-Fi credentials and OTA authentication token.
+/device/ota_config.py
+
+# Local Python bytecode and captured hardware logs.
+__pycache__/
+*.py[cod]
+*.stdout.log
+*.downloaded
