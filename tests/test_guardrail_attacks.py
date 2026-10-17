@@ -142,5 +142,30 @@ class GuardrailAttacks(unittest.TestCase):
                 self.assertNotIn(KEY, r.text)
 
 
+class GuardrailFalseAlarms(unittest.TestCase):
+    """Local work on a masked value must reach the agent untouched. On a real eval run the word list
+    flagged `sqlite3.connect(…)…fetchone()` (it contains "connect(" and "fetch"), the 7B model vetoed
+    it and the task failed. Expected failure until local commands skip inspection."""
+
+    @unittest.expectedFailure
+    def test_local_commands_on_a_masked_path_are_not_inspected(self):
+        commands = {
+            "python sqlite": "python3 -c \"import sqlite3; c=sqlite3.connect('{ph}'); print(c.execute('select count(*) from t').fetchone())\"",
+            "sync dir": "cd {ph}/sync && ls",
+            "echo func": "echo func {ph}",
+        }
+        for name, command in commands.items():
+            with self.subTest(name), gateway(make_config(security=True)) as (app, client, fakes):
+                placeholder = json.loads(exfil_reply(fakes, client))["command"].split()[-1]
+                args = json.dumps({"command": command.format(ph=placeholder)})
+                fakes.upstream = lambda r: httpx.Response(200, json={"choices": [{"index": 0, "finish_reason": "tool_calls", "message": {
+                    "role": "assistant", "content": None,
+                    "tool_calls": [{"id": "x", "type": "function", "function": {"name": "bash", "arguments": args}}]}}]})
+                fakes.security_answers = [[], {"decision": "block", "reason": "a 7B false alarm"}]
+                r = client.post("/v1/chat/completions", headers=SESSION,
+                                json={"model": "m", "messages": read_config() + [{"role": "user", "content": "go"}]})
+                self.assertIn("tool_calls", r.json()["choices"][0]["message"])
+
+
 if __name__ == "__main__":
     unittest.main()

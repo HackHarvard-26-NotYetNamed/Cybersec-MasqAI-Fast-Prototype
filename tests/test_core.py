@@ -21,6 +21,51 @@ def apply(session, items, *ops, veto=True):
     return results
 
 
+def call_items(command):
+    payload = {"messages": [{"role": "assistant", "content": None, "tool_calls": [
+        {"id": "c1", "type": "function", "function": {"name": "bash", "arguments": json.dumps({"command": command})}}]}]}
+    return extract(payload, "openai")
+
+
+class SmallModelSlips(unittest.TestCase):
+    """Format slips a 7B security model made on real eval runs. Each is repaired by masking at least as
+    much as the model asked for, never less."""
+
+    def test_made_up_token_masks_as_a_new_value(self):
+        session = Session("s")
+        items = tool_items("db = /srv/acme/prod/inventory.db")
+        [r] = apply(session, items, {"op": "mask", "item": "#1", "line": 1, "text": "/srv/acme/prod/inventory.db",
+                                     "token": "<PATH_1a2b3c4d>", "class": "secret", "reason": "private db"})
+        self.assertTrue(r["ok"], r)
+        self.assertNotIn("inventory.db", items[0].sanitized)
+        self.assertEqual([e.entity_type for e in session.entities.values()], ["PATH"])
+
+    def test_made_up_alias_token_is_still_rejected(self):
+        session = Session("s")
+        items = tool_items("key sk-...def")
+        [r] = apply(session, items, {"op": "mask", "item": "#1", "line": 1, "text": "sk-...def", "token": "<KEY_1a2b3c4d>", "alias": True})
+        self.assertFalse(r["ok"])
+
+    def test_mask_over_whole_tool_arguments_narrows_to_the_string(self):
+        session = Session("s")
+        items = call_items("cat config/settings.toml")
+        [item] = [i for i in items if i.kind == "tool_arguments"]
+        ref = "#" + str(items.index(item) + 1)
+        [r] = apply(session, items, {"op": "mask", "item": ref, "line": 1, "text": item.original, "type": "COMMAND", "reason": "config path"})
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(json.loads(item.sanitized)["command"][:9], "<COMMAND_")
+
+    def test_mask_over_json_with_two_strings_is_still_rejected(self):
+        session = Session("s")
+        payload = {"messages": [{"role": "assistant", "content": None, "tool_calls": [
+            {"id": "c1", "type": "function", "function": {"name": "bash", "arguments": json.dumps({"command": "ls", "cwd": "/srv"})}}]}]}
+        items = extract(payload, "openai")
+        [item] = [i for i in items if i.kind == "tool_arguments"]
+        ref = "#" + str(items.index(item) + 1)
+        [r] = apply(session, items, {"op": "mask", "item": ref, "line": 1, "text": item.original, "type": "X"})
+        self.assertFalse(r["ok"])
+
+
 class Hide(unittest.TestCase):
     def test_hide_renders_marker_and_checks_anchors(self):
         session = Session("s")

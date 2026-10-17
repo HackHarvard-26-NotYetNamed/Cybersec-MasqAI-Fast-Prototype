@@ -292,6 +292,38 @@ def _token(session: Session, labels: dict[str, str], value: Any) -> str:
     return token
 
 
+def _inside_json_string(item: ContextItem, start: int, end: int) -> tuple[int, int]:
+    """A mask over a whole JSON value in tool arguments (`{"command":"…"}`) would break the JSON. When
+    that value holds exactly one string, narrow the mask to that string's content: still hidden, valid JSON."""
+    if not _parses(item.original):
+        return start, end
+    try:
+        value = json.loads(item.original[start:end])
+    except ValueError:
+        return start, end
+    leaves: list[str] = []
+
+    def walk(v: Any) -> None:
+        if isinstance(v, str) and v:
+            leaves.append(v)
+        elif isinstance(v, dict):
+            for x in v.values():
+                walk(x)
+        elif isinstance(v, list):
+            for x in v:
+                walk(x)
+
+    walk(value)
+    if len(leaves) != 1 or not isinstance(value, (dict, list)):
+        return start, end
+    encoded = json.dumps(leaves[0], ensure_ascii=False)[1:-1]
+    segment = item.original[start:end]
+    at = segment.rfind(encoded)
+    if at < 0 or segment.count(encoded) != 1:
+        return start, end
+    return start + at, start + at + len(encoded)
+
+
 def _parses(text: str) -> bool:
     try:
         json.loads(text)
@@ -382,13 +414,20 @@ class Applier:
     # --- mask ---
     def mask(self, op: dict[str, Any]) -> str:
         item = self.item(op.get("item"))
-        start, end = self._locate(item, op)
+        start, end = _inside_json_string(item, *self._locate(item, op))
         text = item.original[start:end]
         alias = op.get("alias", False)
         if not isinstance(alias, bool):
             raise OpError("alias must be true or false")
         cls, reason = _cls(op, "secret"), _reason(op)
         session = self.session
+        if op.get("token") and not alias and isinstance(op["token"], str) and \
+                self.labels.get(op["token"], op["token"]).replace("<$", "<", 1) not in session.entities:
+            # A placeholder that doesn't exist (small models copy the prompt's example token): mask the
+            # text as a new value instead of failing the request. Masking more never leaks.
+            named = re.fullmatch(r"<\$?([A-Z][A-Z0-9_]*?)_[0-9a-f]{8}>", op["token"])
+            op = {k: v for k, v in op.items() if k != "token"}
+            op.setdefault("type", named.group(1) if named else "SECRET")
         if op.get("token"):
             token = _token(session, self.labels, op["token"])
             entity = session.entities[token]

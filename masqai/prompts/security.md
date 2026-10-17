@@ -26,10 +26,10 @@ Every operation points at EXACTLY ONE occurrence: `text` copied exactly from the
 - Mask a new value:
   {"op":"mask","item":"#4","line":12,"text":"exact raw text","nth":1,"type":"PATH","class":"secret","label":"p1","reason":"points to private application data"}
   `type` is UPPER_SNAKE. `label` (optional) lets later operations in this answer refer to the new value.
-- Mask another occurrence of a known value (text equals its value):
-  {"op":"mask","item":"#4","line":20,"text":"...","token":"<PATH_1a2b3c4d>"}   (or "token":"p1")
+- Mask another occurrence of a known value (text equals its value). `token` is a placeholder copied from mapping, or a label from this answer; never make one up. For a value that isn't in mapping yet, use the first form (no token):
+  {"op":"mask","item":"#4","line":20,"text":"...","token":"<copied from mapping>"}   (or "token":"p1")
 - Mask a partial or changed form of a known value (a truncated key, a reformatted path, a spelled-out email): add "alias": true. It is sent as <$TOKEN>. Mark each occurrence you see; never invent forms that do not appear in the input. Aliases are never copied automatically.
-  {"op":"mask","item":"#4","line":21,"text":"sk-...def","token":"<OR_KEY_1a2b3c4d>","alias":true}
+  {"op":"mask","item":"#4","line":21,"text":"sk-...def","token":"<copied from mapping>","alias":true}
 - Hide lines of a tool_result (whole lines; first and last must equal those raw lines exactly):
   {"op":"hide","item":"#5","start":7,"end":40,"first":"exact raw line 7","last":"exact raw line 40","summary":"≤200 chars, no sensitive content","class":"intel","reason":"..."}
 - Replace one occurrence in a tool_result with a neutral substitute:
