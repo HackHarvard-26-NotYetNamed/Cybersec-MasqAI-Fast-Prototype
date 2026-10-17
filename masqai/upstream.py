@@ -36,14 +36,13 @@ def endpoint_url(base: str, path: str) -> str:
     return base + path
 
 
-def headers_for(provider: ProviderConfig, incoming: dict[str, str], policy: HeaderPolicy | None = None) -> dict[str, str]:
+def headers_for(provider: ProviderConfig, incoming: dict[str, str], policy: HeaderPolicy | None = None, *, key: str | None) -> dict[str, str]:
     policy = policy or HeaderPolicy()
     connection = next((v for k, v in incoming.items() if k.lower() == "connection"), "")
     hop_by_hop = {part.strip().lower() for part in connection.split(",") if part.strip()}
     result = {key: value for key, value in incoming.items() if key.lower() not in hop_by_hop and policy.allows(key)}
     if policy.user_agent:
         result["user-agent"] = policy.user_agent   # the client's own User-Agent identifies the agent and OS
-    key = provider.resolved_key()
     if provider.format == "anthropic":
         if key:
             result["x-api-key"] = key
@@ -55,10 +54,10 @@ def headers_for(provider: ProviderConfig, incoming: dict[str, str], policy: Head
 
 
 async def request(provider: ProviderConfig, path: str, body: dict[str, Any], incoming: dict[str, str], timeout: float,
-                  policy: HeaderPolicy | None = None, params: Any = None) -> httpx.Response:
+                  policy: HeaderPolicy | None = None, params: Any = None, *, key: str | None) -> httpx.Response:
     async with httpx.AsyncClient(timeout=timeout) as client:
         async with client.stream("POST", endpoint_url(provider.base_url, path), params=params, json=body,
-                                 headers=headers_for(provider, incoming, policy)) as response:
+                                 headers=headers_for(provider, incoming, policy, key=key)) as response:
             content = await read_limited(response)
         # A detached copy: same status, headers and body, already read and decoded.
         headers = [(k, v) for k, v in response.headers.multi_items() if k.lower() not in {"content-encoding", "content-length", "transfer-encoding"}]

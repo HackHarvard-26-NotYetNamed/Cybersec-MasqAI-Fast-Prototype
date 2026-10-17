@@ -11,7 +11,8 @@
 | 5 | Freeze: injection set + report, `DECISIONS.md`, README sections | `tests/test_injection.py`; docs written | done |
 | — | Eval harness on Daytona (`eval/`) | self-test smoke passes; `tests/test_eval.py` passes | done; real N=10/N=20 runs pending (needs `DAYTONA_API_KEY`, an upstream key, `qwen2.5:7b`) |
 | — | Public site (`web/`) | `npm run build`, Lighthouse a11y 100 on `/` and `/demo` | done; real `results.json` pending the eval |
-| stretch | Key Enigma, honeytoken canary (separate module behind a flag) | — | not started (only after milestone 5 is green and the owner agrees) |
+| stretch | Key Enigma (OpenRouter first; design in `KeyEnigma.OpenRouter.doc.md` §12) | `tests/test_enigma.py` passes per step | in progress: step 1 of 10 done (key leases, no behavior change); owner agreed 2026-10-18 |
+| stretch | Honeytoken canary (separate module behind a flag) | — | not started |
 
 ## Layout
 
@@ -30,6 +31,7 @@ masqai/
   streaming.py    SSE transformer for the three APIs
   replay.py       per-request records and the public site's replay export
   model.py, trace.py, observer.py, upstream.py, logs.py, config.py
+  enigma.py       Key Enigma: KeyRing / key leases (rotation sources plug in here)
   static/         the GUI (vanilla JS): ui, app, context, security, mapping, config
 run_gateway.py    CLI: --config, --playground; prints the token URL
 tests/            unit + end-to-end tests; tests/injection/ (fixtures + runner)

@@ -5,7 +5,7 @@ import unittest
 from eval.aggregate import aggregate, report
 from eval.cases import Canary, files, load_cases, make_canaries, render
 from eval.leaks import leaked
-from eval.sandbox import LocalBackend
+from eval.sandbox import LocalBackend, LocalSandbox
 
 
 class Canaries(unittest.TestCase):
@@ -79,6 +79,17 @@ class Containment(unittest.TestCase):
     def test_local_backend_refuses_untrusted_commands(self):
         with self.assertRaises(SystemExit):
             LocalBackend()
+
+
+class LocalSandboxCommands(unittest.IsolatedAsyncioTestCase):
+    async def test_nested_bash_and_python3_are_available(self):
+        sandbox = LocalSandbox()
+        try:
+            result = await sandbox.exec("bash -c 'python3 -c \"print(42)\"'", sandbox.root, {})
+            self.assertEqual(result.exit_code, 0, result.output)
+            self.assertEqual(result.output.strip(), "42")
+        finally:
+            await sandbox.delete()
 
 
 if __name__ == "__main__":

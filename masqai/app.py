@@ -29,6 +29,7 @@ from .adapter import API_ANTHROPIC, API_CHAT, API_RESPONSES, BadRequest, Unknown
 from .config import (ALWAYS_DROPPED_HEADERS, DEFAULT_HEADER_ALLOWLIST, DEFAULT_HEADER_BLOCKLIST, ENV_NAME_RE,
                      ConfigReferenceError, GatewayConfig, load_config, validation_errors)
 from .detectors import host_values, rule_names
+from .enigma import KeyRing
 from .hygiene import pseudonymize, stripped_headers
 from .model import Session
 from .policy import CATEGORIES
@@ -55,7 +56,7 @@ BLOCK_STATUS = {"security_model_failed": 502, "invalid_correction": 502, "remote
 
 
 def create_app(config: GatewayConfig, *, admin_token: str | None = None, playground: bool = False,
-               frozen_env: set[str] | None = None) -> FastAPI:
+               frozen_env: set[str] | None = None, keyring: KeyRing | None = None) -> FastAPI:
     logs.configure()
     if config.host != "127.0.0.1":
         raise ValueError("MasqAI binds to 127.0.0.1 only")
@@ -65,7 +66,8 @@ def create_app(config: GatewayConfig, *, admin_token: str | None = None, playgro
     allowed_hosts = {f"127.0.0.1:{config.port}", f"localhost:{config.port}"}
 
     store = SessionStore()
-    sanitizer = Sanitizer(config)
+    keyring = keyring or KeyRing()
+    sanitizer = Sanitizer(config, keyring)
     traces = TraceLog()
     subscribers: set[asyncio.Queue] = set()
     listeners: list = []   # in-process observers (tests, embedding); events are already RAM-only
@@ -302,6 +304,7 @@ def create_app(config: GatewayConfig, *, admin_token: str | None = None, playgro
         session.in_flight += 1
         released = False
         streaming = False   # once a stream is handed back, its generator releases the session
+        upstream_lease = None
 
         def release() -> None:
             nonlocal released
@@ -369,7 +372,8 @@ def create_app(config: GatewayConfig, *, admin_token: str | None = None, playgro
             logs.log.info("forwarding to %s (provider=%s model=%r) after %.0f ms; %s", url, provider.name, upstream_model,
                           (time.monotonic() - started) * 1000, logs.shape(sanitized))
             table = restore_map(session.restore_table())
-            outgoing = headers_for(provider, dict(request.headers), config.headers)
+            upstream_lease = keyring.lease(provider)
+            outgoing = headers_for(provider, dict(request.headers), config.headers, key=upstream_lease.key)
             recorder = ResponseRecorder()
             observer = ResponseObserver(session, publish)
 
@@ -390,6 +394,7 @@ def create_app(config: GatewayConfig, *, admin_token: str | None = None, playgro
                     finally:
                         await upstream.aclose()
                         await client.aclose()
+                        upstream_lease.release()
                         release()
                     logs.log.error("upstream HTTP %d: %s", upstream.status_code, masked(logs.error_text(body)))
                     return Response(body, status_code=upstream.status_code, headers=response_headers(upstream.headers))
@@ -432,6 +437,7 @@ def create_app(config: GatewayConfig, *, admin_token: str | None = None, playgro
                         finish_record()
                         await upstream.aclose()
                         await client.aclose()
+                        upstream_lease.release()
                         release()
 
                 # Read the first frame before answering: a stream that would open with a rejected tool call
@@ -453,8 +459,11 @@ def create_app(config: GatewayConfig, *, admin_token: str | None = None, playgro
                 streaming = True
                 return StreamingResponse(chained(), status_code=upstream.status_code, headers=response_headers(upstream.headers))
 
-            response = await upstream_request(provider, path, sanitized, dict(request.headers), config.upstream_timeout_seconds, config.headers,
-                                              params=request.query_params)
+            try:
+                response = await upstream_request(provider, path, sanitized, dict(request.headers), config.upstream_timeout_seconds, config.headers,
+                                                  params=request.query_params, key=upstream_lease.key)
+            finally:
+                upstream_lease.release()
             if response.status_code >= 400:
                 logs.log.error("upstream HTTP %d: %s", response.status_code, masked(logs.error_text(response.content)))
                 return Response(response.content, status_code=response.status_code, headers=response_headers(response.headers))
@@ -487,6 +496,8 @@ def create_app(config: GatewayConfig, *, admin_token: str | None = None, playgro
             # Never echo exception text: it can contain request content.
             return error(500, "masqai_gateway_error", f"internal gateway error (request {rid}); see the gateway console")
         finally:
+            if upstream_lease is not None and not streaming:
+                upstream_lease.release()
             if not streaming:
                 release()
             enforce_retention()
@@ -516,10 +527,11 @@ def create_app(config: GatewayConfig, *, admin_token: str | None = None, playgro
             return error(404, "masqai_unsupported_endpoint", f"MasqAI does not sanitize {request.method} /v1/{path}; nothing was sent")
         try:
             provider, _ = config.route(None)
-            async with httpx.AsyncClient(timeout=config.upstream_timeout_seconds) as client:
-                async with client.stream(request.method, endpoint_url(provider.base_url, "/v1/" + path), params=request.query_params,
-                                         headers=headers_for(provider, dict(request.headers), config.headers)) as response:
-                    content = await read_limited(response)
+            with keyring.lease(provider) as key:
+                async with httpx.AsyncClient(timeout=config.upstream_timeout_seconds) as client:
+                    async with client.stream(request.method, endpoint_url(provider.base_url, "/v1/" + path), params=request.query_params,
+                                             headers=headers_for(provider, dict(request.headers), config.headers, key=key)) as response:
+                        content = await read_limited(response)
             return Response(content, status_code=response.status_code, headers=response_headers(response.headers))
         except Exception as exc:
             logs.log.error("passthrough %s /v1/%s failed: %s", request.method, path, exc.__class__.__name__)

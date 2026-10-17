@@ -66,9 +66,9 @@ class Fakes:
 
 
 @contextlib.contextmanager
-def gateway(config: GatewayConfig | None = None, *, playground: bool = False, frozen_env: set[str] | None = None):
+def gateway(config: GatewayConfig | None = None, *, playground: bool = False, frozen_env: set[str] | None = None, keyring=None):
     fakes = Fakes()
-    app = create_app(config or make_config(), admin_token=TOKEN, playground=playground, frozen_env=frozen_env)
+    app = create_app(config or make_config(), admin_token=TOKEN, playground=playground, frozen_env=frozen_env, keyring=keyring)
     factory = lambda **kw: REAL_ASYNC_CLIENT(transport=httpx.MockTransport(fakes.handler), **{k: v for k, v in kw.items() if k != "transport"})
     with patch("httpx.AsyncClient", factory):
         client = TestClient(app, base_url=f"http://127.0.0.1:{PORT}")

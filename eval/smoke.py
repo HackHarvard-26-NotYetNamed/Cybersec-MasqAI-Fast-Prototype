@@ -16,13 +16,13 @@ from .run_eval import one_run, preflight
 from .sandbox import DaytonaBackend, LocalBackend
 
 
-async def smoke(case_id: str, sandbox: str, self_test: bool, stream: bool = False) -> int:
+async def smoke(case_id: str, sandbox: str, self_test: bool, stream: bool = False, security_model: str | None = None) -> int:
     [case] = load_cases(case_id)
     backend = LocalBackend(trusted_commands=self_test) if sandbox == "local" else DaytonaBackend()
     ok = True
     started = time.monotonic()
     async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=10)) as http:
-        await preflight(http, ["raw", "masqai"])
+        await preflight(http, ["raw", "masqai"], expected_security_model=security_model)
         try:
             for condition in ("raw", "masqai"):
                 row = await one_run(case, condition, backend, http, stream)
@@ -42,9 +42,8 @@ def main() -> None:
     parser.add_argument("--case", default="uc2-db-path")
     parser.add_argument("--sandbox", choices=["daytona", "local"], default="daytona")
     parser.add_argument("--self-test", action="store_true")
-    parser.add_argument("--stream", action="store_true", help="the agent streams (SSE), like OpenCode or Claude Code")
     args = parser.parse_args()
-    sys.exit(asyncio.run(smoke(args.case, args.sandbox, args.self_test, args.stream)))
+    sys.exit(asyncio.run(smoke(args.case, args.sandbox, args.self_test)))
 
 
 if __name__ == "__main__":

@@ -13,6 +13,8 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
+import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -106,19 +108,37 @@ class DaytonaBackend:
 
 class LocalSandbox:
     def __init__(self) -> None:
-        self.root = tempfile.mkdtemp(prefix="masq-eval-")
+        self.host_root = tempfile.mkdtemp(prefix="masq-eval-")
+        self.bash_bin = _find_bash()
+        self.root = _to_bash_path(self.host_root) if os.name == "nt" else self.host_root
+        self.env = os.environ.copy()
+        if os.name == "nt":
+            shim_dir = Path(self.host_root) / ".harness" / "bin"
+            shim_dir.mkdir(parents=True)
+            python_path = _to_bash_path(sys.executable)
+            shim = shim_dir / "python3"
+            shim.write_text(f'#!/usr/bin/env bash\nexec "{python_path}" "$@"\n', encoding="utf-8")
+            bash_dir = _to_bash_path(str(Path(self.bash_bin).parent))
+            self.env["PATH"] = f"{_to_bash_path(str(shim_dir))}:{bash_dir}:{self.env.get('PATH', '')}"
 
     async def upload(self, files: list[tuple[str, bytes]]) -> None:
         for path, data in files:
-            target = Path(path)
-            if not str(target).startswith(self.root):
+            if not path.startswith(self.root.rstrip("/") + "/") and path != self.root:
+                raise ValueError("local sandbox: upload outside its root")
+            target = Path(_from_bash_path(path) if os.name == "nt" else path)
+            if os.path.commonpath((self.host_root, str(target.resolve()))) != os.path.commonpath((self.host_root, self.host_root)):
                 raise ValueError("local sandbox: upload outside its root")
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
 
     async def exec(self, command: str, cwd: str, env: dict[str, str], timeout: int = COMMAND_TIMEOUT_S) -> ExecResult:
-        Path(cwd).mkdir(parents=True, exist_ok=True)
-        process = await asyncio.create_subprocess_exec("bash", "-c", command, cwd=cwd, env={**os.environ, **env},
+        host_cwd = _from_bash_path(cwd) if os.name == "nt" else cwd
+        Path(host_cwd).mkdir(parents=True, exist_ok=True)
+        command_env = {**self.env, **env}
+        if os.name == "nt":
+            command_env["PATH"] = f"{self.env['PATH']}:{env.get('PATH', '')}"
+        process = await asyncio.create_subprocess_exec(self.bash_bin, "-c", command, cwd=host_cwd,
+                                                       env=command_env,
                                                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
         try:
             out, _ = await asyncio.wait_for(process.communicate(), timeout)
@@ -128,15 +148,50 @@ class LocalSandbox:
         return ExecResult(process.returncode or 0, out.decode("utf-8", "replace")[-MAX_OUTPUT:])
 
     async def delete(self) -> None:
-        shutil.rmtree(self.root, ignore_errors=True)
+        shutil.rmtree(self.host_root, ignore_errors=True)
+
+
+def _find_bash() -> str:
+    bash = shutil.which("bash")
+    if bash:
+        return bash
+    candidates = (
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files (x86)\Git\bin\bash.exe",
+    )
+    for candidate in candidates:
+        if Path(candidate).is_file():
+            return candidate
+    raise RuntimeError("Local sandbox requires Bash; install Git for Windows and ensure bash.exe is available")
+
+
+def _cygpath(flag: str, path: str) -> str:
+    bash_dir = Path(_find_bash()).parent
+    candidates = (bash_dir / "cygpath.exe", bash_dir.parent / "usr" / "bin" / "cygpath.exe", Path(shutil.which("cygpath") or ""))
+    cygpath = next((str(candidate) for candidate in candidates if candidate.is_file()), None)
+    if not cygpath:
+        raise RuntimeError("Git for Windows cygpath.exe is required to map local sandbox paths")
+    return subprocess.check_output([cygpath, flag, path], text=True).strip()
+
+
+def _to_bash_path(path: str) -> str:
+    return _cygpath("-u", path) if os.name == "nt" else path
+
+
+def _from_bash_path(path: str) -> str:
+    return _cygpath("-w", path) if os.name == "nt" else path
 
 
 class LocalBackend:
-    name = "local (self-test only)"
+    name = "local"
 
     def __init__(self, trusted_commands: bool = False) -> None:
+        allow_untrusted = os.getenv("MASQAI_ALLOW_LOCAL_SANDBOX", "0").lower() in ("1", "true", "yes")
+        if not trusted_commands and not allow_untrusted:
+            raise SystemExit("the local backend runs commands on this machine; set MASQAI_ALLOW_LOCAL_SANDBOX=1 or pass --self-test to permit it")
         if not trusted_commands:
-            raise SystemExit("the local backend runs commands on this machine; it is only for the scripted self-test model")
+            import warnings
+            warnings.warn("LocalBackend: executing untrusted commands locally on the host machine.")
 
     async def create(self, run_id: str) -> LocalSandbox:
         return LocalSandbox()

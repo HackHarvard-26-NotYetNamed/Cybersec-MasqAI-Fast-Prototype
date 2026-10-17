@@ -93,7 +93,7 @@ for keys only, any 12-character or longer piece of its random part.
 
 ```bash
 pip install -r requirements.txt -r eval/requirements.txt
-ollama pull qwen2.5:7b                       # the security model (local)
+ollama run nemotron-3.5-lightning:30b         # the security model (local)
 # Ollama's default 4096-token window is too small: a full window drops the instructions (--context-shift).
 printf 'FROM qwen2.5:7b\nPARAMETER num_ctx 16384\n' > Modelfile && ollama create qwen2.5:7b-16k -f Modelfile
 
@@ -109,6 +109,7 @@ export DAYTONA_API_KEY=...
 python -m eval.smoke                                                  # < 3 min, pass/fail
 python -m eval.smoke --stream                                         # the same, streaming like real agents
 python -m eval.run_eval --cases all --conditions raw,masqai --runs 10 --concurrency 8 \
+       --security-model nemotron-3.5-lightning:30b \
        --untrusted-model google/gemini-3.8-flash
 python -m eval.run_eval --injection --runs 20                         # optional: tests/injection
 python -m eval.aggregate eval/out/runs.jsonl > web/public/data/results.json

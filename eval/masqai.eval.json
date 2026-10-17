@@ -12,7 +12,7 @@
   "security": {
     "enabled": true,
     "provider": "ollama-local",
-    "model": "qwen2.5:7b-16k",
+    "model": "nemotron-3.5-lightning:30b",
     "api_format": "openai",
     "allow_remote_security_model": false,
     "system_prompt": "",
@@ -21,8 +21,7 @@
     "nearest_ops": -1,
     "op_context_lines": 2,
     "auto_mask": "auto_veto",
-    "timeout_s": 180,
-    "context_tokens": 16384
+    "timeout_s": 600
   },
   "detectors": {"detect_host_identifiers": false, "custom_values": [], "rules_dir": "masqai/rules"},
   "headers": {"mode": "blocklist", "user_agent": "masqai/0.2.0"},

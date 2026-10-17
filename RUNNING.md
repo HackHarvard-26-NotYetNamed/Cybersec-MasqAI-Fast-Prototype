@@ -104,6 +104,10 @@ calls whose `type` isn't `function`; Responses `computer_call(_output)`, `file_s
 They run on every request, before the security model and also without it. They can't be prompt-injected, and with
 the security model off they are the only layer. Rules are data in [`masqai/rules`](masqai/rules):
 
+When the security model is disabled or unconfigured, tool calls containing placeholders are allowed unless their
+arguments contain a clear outbound-network indicator. This detectors-only tool policy is weaker than model-backed
+inspection and blocks only recognizable network intent.
+
 - **Patterns** (`patterns.toml`): PEM private keys (the whole block), JWTs, then prefix tokens (OpenRouter, Anthropic,
   OpenAI, AWS `AKIA`/`ASIA`, Stripe, Google `AIza…`, Slack, GitHub, GitLab, npm, Hugging Face, PyPI, DigitalOcean,
   Shopify, SendGrid). A token may not be glued to a word on the left (`task-force…` is not `sk-…`).

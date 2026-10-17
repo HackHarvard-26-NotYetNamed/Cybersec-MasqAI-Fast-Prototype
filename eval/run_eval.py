@@ -97,7 +97,7 @@ async def one_run(case: Case, condition: str, backend, http: httpx.AsyncClient, 
     return row
 
 
-async def preflight(http: httpx.AsyncClient, conditions: list[str]) -> None:
+async def preflight(http: httpx.AsyncClient, conditions: list[str], expected_security_model: str | None = None) -> None:
     for name, url in (("relay", f"{RELAY}/relay/api/requests?tag=preflight"), ("MasqAI", f"{MASQ}/")):
         if name == "MasqAI" and "masqai" not in conditions:
             continue
@@ -105,6 +105,16 @@ async def preflight(http: httpx.AsyncClient, conditions: list[str]) -> None:
             (await http.get(url, timeout=5)).raise_for_status()
         except Exception as exc:
             raise SystemExit(f"{name} is not reachable at {url} ({exc.__class__.__name__}); see eval/README.md")
+    if "masqai" in conditions and expected_security_model:
+        try:
+            cfg_resp = await http.get(f"{MASQ}/api/config", timeout=5)
+            if cfg_resp.status_code == 200:
+                active_model = (cfg_resp.json().get("security") or {}).get("model")
+                if active_model and active_model != expected_security_model:
+                    print(f"WARNING: MasqAI gateway is currently using security model {active_model!r}, but --security-model was set to {expected_security_model!r}.", file=sys.stderr)
+                    print("         You can update the gateway's config or restart it with the intended model.", file=sys.stderr)
+        except Exception:
+            pass
 
 
 async def injection_mode(args: argparse.Namespace) -> int:
@@ -140,7 +150,7 @@ async def main_async(args: argparse.Namespace) -> int:
     semaphore = asyncio.Semaphore(args.concurrency)
     done = failed = 0
     async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=10)) as http:
-        await preflight(http, conditions)
+        await preflight(http, conditions, expected_security_model=args.security_model)
 
         async def guarded(case: Case, condition: str) -> None:
             nonlocal done, failed
@@ -179,7 +189,7 @@ def main() -> None:
     parser.add_argument("--runs", type=int, default=10, help="runs per case per condition")
     parser.add_argument("--concurrency", type=int, default=8)
     parser.add_argument("--untrusted-model", default=os.getenv("EVAL_MODEL", "unknown"), help="the model the relay forwards to (relay --eval-model)")
-    parser.add_argument("--security-model", default=os.getenv("EVAL_SECURITY_MODEL", "qwen2.5:7b (local)"))
+    parser.add_argument("--security-model", default=os.getenv("EVAL_SECURITY_MODEL", "nemotron-3.5-lightning:30b"), help="security model name (e.g. nemotron-3.5-lightning:30b)")
     parser.add_argument("--sandbox", choices=["daytona", "local"], default="daytona")
     parser.add_argument("--self-test", action="store_true", help="with --sandbox local: commands come from eval/fake_llm.py only")
     parser.add_argument("--stream", action="store_true", help="the agent streams (SSE), like OpenCode or Claude Code")
@@ -190,12 +200,25 @@ def main() -> None:
     async def runner() -> int:
         task = asyncio.current_task()
         loop = asyncio.get_running_loop()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, task.cancel)
+        previous_handlers: dict[signal.Signals, Any] = {}
+
+        def cancel_task() -> None:
+            # add_signal_handler is unavailable on Windows' default event loop.
+            loop.call_soon_threadsafe(task.cancel)
+
         try:
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                try:
+                    loop.add_signal_handler(sig, cancel_task)
+                except NotImplementedError:
+                    previous_handlers[sig] = signal.getsignal(sig)
+                    signal.signal(sig, lambda _signum, _frame: cancel_task())
             return await main_async(args)
         except asyncio.CancelledError:
             return 130
+        finally:
+            for sig, previous in previous_handlers.items():
+                signal.signal(sig, previous)
 
     sys.exit(asyncio.run(runner()))
 

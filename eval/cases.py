@@ -121,4 +121,5 @@ def render(text: str, values: dict[str, str], root: str) -> str:
 def files(case: Case) -> list[tuple[str, bytes]]:
     """Workspace files as (relative path, template bytes)."""
     base = case.path / "workspace"
-    return [(str(p.relative_to(base)), p.read_bytes()) for p in sorted(base.rglob("*")) if p.is_file()] if base.is_dir() else []
+    return [(str(p.relative_to(base)), p.read_bytes()) for p in sorted(base.rglob("*"))
+            if p.is_file() and "__pycache__" not in p.parts] if base.is_dir() else []

@@ -58,6 +58,13 @@ the tests were rewritten against the brief.
   restoring placeholders across all tool calls, MasqAI inspects tool calls containing placeholders. Calls that
   attempt to exfiltrate secrets over network vectors are rejected (failing closed on errors), while local file/DB
   queries pass through unhindered.
+- **Detectors-only inbound tool mode is weaker by design.** When the security model is disabled or unconfigured,
+  calls with placeholders are allowed unless their arguments contain a clear outbound-network indicator. This
+  preserves detector-only operation for local tools while still blocking obvious network commands; the full model
+  remains the authority for unknown or ambiguous calls when enabled.
+- **Agent file tools are exact-name allowlisted.** OpenCode `read`, `edit`, `write`, `glob`, `grep`, `list` and
+  Claude Code `Read`, `Edit`, `Write`, `Glob`, `Grep` are treated as local file operations before model inspection.
+  MCP-prefixed names are intentionally not matched by this allowlist.
 - **Active tool rejection.** A rejected call is not silently dropped. `security.tool_rejection: "rewrite"` (default)
   keeps the call but turns every string in its arguments into `echo "MasqAI: the user's security profile rejected this
   execution"`: the agent runs that, the untrusted model reads the rejection as the tool result, and the session goes on.
@@ -79,6 +86,24 @@ the tests were rewritten against the brief.
   prompt, and with `--context-shift` drops all but its first tokens once generation fills the window: either way the
   instructions can vanish while the answer still parses. The eval uses a 16k-window model (`qwen2.5:7b-16k`).
 - **Prompt injection** against the security model is measured (`tests/injection/`), not defended yet.
+
+## Key Enigma
+
+Design and owner decisions: `KeyEnigma.OpenRouter.doc.md`. The owner agreed to start the stretch goal on 2026-10-18.
+
+- **Defaults:** 15 min rotation (minimum 5 min), $2 per key, fail-closed. A dedicated OpenRouter workspace with a
+  budget is **required**.
+- **Management key custody:** the user chooses a **passphrase vault** or an **ESP32 key-provider device**. There is
+  deliberately no plaintext env-var mode.
+- **Step 1 (done): one place where keys are handed out.** Every upstream call takes its key as a *lease* from
+  `enigma.KeyRing` and releases it exactly once:
+  - for proxy requests, in the same `release()` as the session's `in_flight` count. A stream holds its lease until
+    the generator's `finally`, so a key can't be revoked under an open stream.
+  - for `/v1/models` and the security-model calls, around the single HTTP call.
+  `headers_for` and `upstream.request` take the key as a **required keyword**, so a new call site can't silently
+  fall back to the env var.
+  - The default source, `EnvKeySource`, reads `api_key_env` on every lease, so there is no behavior change.
+  - A request that is blocked before forwarding never touches the upstream key.
 
 ## Eval harness
 

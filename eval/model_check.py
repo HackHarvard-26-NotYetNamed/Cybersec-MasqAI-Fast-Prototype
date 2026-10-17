@@ -82,8 +82,10 @@ async def one(config, case: Case) -> dict[str, Any]:
             "prompt_tokens": max(((a.get("usage") or {}).get("prompt_tokens") or 0) for a in attempts) if attempts else 0}
 
 
-async def main_async(config_path: str, runs: int, selection: str) -> None:
+async def main_async(config_path: str, runs: int, selection: str, model_override: str | None = None) -> None:
     config = load_config(config_path)
+    if model_override:
+        config.security.model = model_override
     print(f"security model: {config.security.model} at {config.provider(config.security.provider).base_url} · {runs} runs per case\n")
     header = f"{'case':22} {'recall':>7} {'blocked':>8} {'p50 ms':>8} {'max ms':>8} {'ops ok':>7} {'ops ✗':>6} {'corrected':>10} {'max ctx':>8}  missed (types)"
     print(header + "\n" + "-" * len(header))
@@ -114,8 +116,9 @@ def main() -> None:
     parser.add_argument("--config", default=str(Path(__file__).parent / "masqai.eval.json"))
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--cases", default="all")
+    parser.add_argument("--security-model", default=None, help="override the security model name (e.g. nemotron-3.5-lightning:30b)")
     args = parser.parse_args()
-    asyncio.run(main_async(args.config, args.runs, args.cases))
+    asyncio.run(main_async(args.config, args.runs, args.cases, args.security_model))
 
 
 if __name__ == "__main__":
