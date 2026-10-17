@@ -77,13 +77,15 @@ async def one(config, case: Case) -> dict[str, Any]:
     names = [] if blocked else leaked(canaries, [{"body": serialize(payload, items)}])
     return {"blocked": blocked, "reason": reason, "ms": elapsed, "canaries": len(scanned), "leaked": names,
             "accepted": sum(r["ok"] for r in results), "rejected": sum(not r["ok"] for r in results),
-            "corrected": len(attempts) > 1}
+            "corrected": len(attempts) > 1,
+            # Prompt tokens per call: a value stuck at the server's context window means Ollama truncated the input.
+            "prompt_tokens": max(((a.get("usage") or {}).get("prompt_tokens") or 0) for a in attempts) if attempts else 0}
 
 
 async def main_async(config_path: str, runs: int, selection: str) -> None:
     config = load_config(config_path)
     print(f"security model: {config.security.model} at {config.provider(config.security.provider).base_url} · {runs} runs per case\n")
-    header = f"{'case':22} {'recall':>7} {'blocked':>8} {'p50 ms':>8} {'max ms':>8} {'ops ok':>7} {'ops ✗':>6} {'corrected':>10}  missed (types)"
+    header = f"{'case':22} {'recall':>7} {'blocked':>8} {'p50 ms':>8} {'max ms':>8} {'ops ok':>7} {'ops ✗':>6} {'corrected':>10} {'max ctx':>8}  missed (types)"
     print(header + "\n" + "-" * len(header))
     totals = {"canaries": 0, "kept": 0, "blocked": 0, "runs": 0}
     for case in load_cases(selection):
@@ -101,7 +103,7 @@ async def main_async(config_path: str, runs: int, selection: str) -> None:
         print(f"{case.id:22} {kept / canaries if canaries else float('nan'):>7.0%} {len(rows) - len(done):>4}/{len(rows):<3} "
               f"{statistics.median(r['ms'] for r in rows):>8.0f} {max(r['ms'] for r in rows):>8.0f} "
               f"{sum(r['accepted'] for r in rows):>7} {sum(r['rejected'] for r in rows):>6} "
-              f"{sum(r['corrected'] for r in rows):>6}/{len(rows):<3}  {', '.join(missed) or '-'}"
+              f"{sum(r['corrected'] for r in rows):>6}/{len(rows):<3} {max(r['prompt_tokens'] for r in rows):>8}  {', '.join(missed) or '-'}"
               + (f"  [{', '.join(sorted({r['reason'] for r in rows if r['reason']}))}]" if len(done) < len(rows) else ""), flush=True)
     recall = totals["kept"] / totals["canaries"] if totals["canaries"] else float("nan")
     print(f"\noverall: canary recall {recall:.0%} (of runs that weren't blocked) · blocked {totals['blocked']}/{totals['runs']}")
