@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+import urllib.parse
 from dataclasses import dataclass
 from typing import Any
 
@@ -113,8 +114,9 @@ class Span:
 
 
 def auto_spans(session: Session, item_id: str, text: str) -> tuple[list[Span], list[dict[str, Any]]]:
-    """Exact copies of known canonical values at token boundaries. Also returns copies that were left
-    as-is (inside a word, or vetoed), so the GUI and the security model can see them."""
+    """Exact copies of known canonical values and their transit variants (JSON escaped, URL encoded,
+    slash-normalized) at token boundaries. Also returns copies that were left as-is (inside a word, or vetoed),
+    so the GUI and the security model can see them."""
     spans, skipped = [], []
     vetoed = session.vetoes.get(item_id, set())
     for entity in session.entities.values():
@@ -125,12 +127,28 @@ def auto_spans(session: Session, item_id: str, text: str) -> tuple[list[Span], l
         escaped = json.dumps(value, ensure_ascii=False)[1:-1]
         if escaped != value:
             forms.add(escaped)   # the same value inside JSON text (tool call arguments)
+        
+        # URL / percent-encoded variants (both fully quoted and safe="/")
+        for safe_chars in ("", "/"):
+            enc = urllib.parse.quote(value, safe=safe_chars)
+            if enc != value:
+                forms.add(enc)
+
+        # Ambient identifiers (username, host) should also treat hyphens and dots as word constituents
+        # when flanked by other alphanumerics, avoiding auto-masking inside structured tokens like sk-alice-token.
+        is_ambient = entity.entity_type in ("USERNAME", "HOST", "USER")
         for form in forms:
             position = text.find(form)
             while position != -1:
                 end = position + len(form)
-                inside = (_word(form[0]) and position > 0 and _word(text[position - 1])) or \
-                         (_word(form[-1]) and end < len(text) and _word(text[end]))
+                prev_ch = text[position - 1] if position > 0 else ""
+                next_ch = text[end] if end < len(text) else ""
+                
+                # For ambient identifiers, a dot only counts as a word continuation if it is
+                # part of a compound identifier (flanked by alphanumerics), not trailing punctuation.
+                inside_left = _word(prev_ch) or (is_ambient and prev_ch == "." and position > 1 and _word(text[position - 2]))
+                inside_right = _word(next_ch) or (is_ambient and next_ch == "." and end + 1 < len(text) and _word(text[end + 1]))
+                inside = (_word(form[0]) and inside_left) or (_word(form[-1]) and inside_right)
                 if inside:
                     skipped.append({"start": position, "end": end, "token": entity.token, "reason": "inside a word"})
                 elif (position, end) in vetoed:
@@ -508,8 +526,25 @@ class Applier:
         item = self.item(op.get("item"))
         start, end = self._locate(item, op)
         autos, _ = auto_spans(self.session, item.id, item.original)
-        if not any(s.start == start and s.end == end for s in autos):
+        matched_auto = next((s for s in autos if s.start == start and s.end == end), None)
+        if matched_auto is None:
             raise OpError("unmask only applies to an automatic copy of a known value at exactly this position")
+        
+        is_global = op.get("global", False)
+        if not isinstance(is_global, bool):
+            raise OpError("global must be a boolean (true or false)")
+            
+        if is_global:
+            # Revoke the entity globally from session.entities and remove any auto-spans of it
+            token = matched_auto.token
+            if token in self.session.entities:
+                del self.session.entities[token]
+            # Clear any other entities that merged into this token
+            for ent in self.session.entities.values():
+                if ent.merged_into == token:
+                    ent.merged_into = None
+            return f"entity {token} globally revoked and automatic masks removed"
+
         self.session.vetoes.setdefault(item.id, set()).add((start, end))
         self.session.veto_reasons[(item.id, start, end)] = _reason(op)
         return "automatic mask removed at this occurrence"

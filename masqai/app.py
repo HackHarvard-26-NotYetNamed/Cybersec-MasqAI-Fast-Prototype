@@ -33,7 +33,7 @@ from .hygiene import pseudonymize, stripped_headers
 from .model import Session
 from .observer import ResponseObserver
 from .replay import ResponseRecorder, export, record_request
-from .restore import restore_map, restore_response
+from .restore import block_inbound_tool_call, extract_inbound_tool_calls, restore_map, restore_response
 from .sanitize import SanitizationError, Sanitizer
 from .session import SessionStore
 from .streaming import SSETransformer
@@ -415,12 +415,21 @@ def create_app(config: GatewayConfig, *, admin_token: str | None = None, playgro
                 return Response(response.content, status_code=response.status_code, headers=response_headers(response.headers))
             data = response.json()
             if isinstance(data, dict):
+                # Inline Inbound Tool Guardrail: check tool calls for exfiltration before restoring
+                inbound_calls = extract_inbound_tool_calls(data)
+                for call in inbound_calls:
+                    allowed, reason = await sanitizer.inspect_inbound_tool_call(
+                        session, call["tool"], call["arguments"], call["placeholders"], table
+                    )
+                    if not allowed:
+                        logs.log.warning("blocked inbound tool call %s: %s", call["tool"], reason)
+                        data = block_inbound_tool_call(data, call, reason)
+
                 recorder.body(data)
                 observer.event(data)
                 finish_record()
                 restored = restore_response(data, table)
-                if restored != data:
-                    return JSONResponse(restored, status_code=response.status_code, headers=response_headers(response.headers))
+                return JSONResponse(restored, status_code=response.status_code, headers=response_headers(response.headers))
             return Response(response.content, status_code=response.status_code, headers=response_headers(response.headers))
         except SanitizationError as exc:
             logs.log.error("blocked (fail closed, %s) after %.0f ms; nothing was sent upstream", exc.reason, (time.monotonic() - started) * 1000)

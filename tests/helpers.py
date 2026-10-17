@@ -53,7 +53,10 @@ class Fakes:
                 answer = answer(json.loads(body["messages"][-1]["content"]))
             if isinstance(answer, httpx.Response):
                 return answer
-            content = answer if isinstance(answer, str) else json.dumps({"operations": answer})
+            if isinstance(answer, dict) and "decision" in answer:
+                content = json.dumps(answer)
+            else:
+                content = answer if isinstance(answer, str) else json.dumps({"operations": answer})
             return httpx.Response(200, json={"choices": [{"message": {"role": "assistant", "content": content}}]})
         self.upstream_calls.append(request)
         return self.upstream(request)

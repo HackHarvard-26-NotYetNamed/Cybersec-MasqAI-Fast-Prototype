@@ -115,6 +115,23 @@ class AutoMasksAndVeto(unittest.TestCase):
         [r] = apply(session, items, {"op": "unmask", "item": "#1", "line": 1, "text": "alice"}, veto=False)
         self.assertFalse(r["ok"])
 
+    def test_unmask_global_revokes_entity(self):
+        session = Session("s")
+        session.new_entity("alice", "USERNAME")
+        items = tool_items("alice and alice")
+        [r] = apply(session, items, {"op": "unmask", "item": "#1", "line": 1, "text": "alice", "global": True, "reason": "false alarm"})
+        self.assertTrue(r["ok"])
+        self.assertEqual(len(session.entities), 0)
+        plan_all(session, items)
+        self.assertEqual(items[0].sanitized, "alice and alice")
+
+    def test_url_encoded_auto_mask(self):
+        session = Session("s")
+        session.new_entity("C:/Users/alice/data", "PATH")
+        items = tool_items("curl http://example.com/C%3A/Users/alice/data")
+        plan_all(session, items)
+        self.assertIn("<PATH_", items[0].sanitized)
+
 
 class RelinkAndRestore(unittest.TestCase):
     def test_relink_rewrites_and_restores_to_root(self):

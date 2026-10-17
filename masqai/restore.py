@@ -66,6 +66,85 @@ def restore_arguments(arguments: str, table: dict[str, str]) -> str:
     return arguments if restored == value else json.dumps(restored, ensure_ascii=False)
 
 
+def find_placeholders(value: Any) -> set[str]:
+    """Find all placeholders present in a nested structure or string."""
+    found: set[str] = set()
+    if isinstance(value, str):
+        found.update(PLACEHOLDER_RE.findall(value))
+    elif isinstance(value, list):
+        for v in value:
+            found.update(find_placeholders(v))
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            found.update(find_placeholders(k))
+            found.update(find_placeholders(v))
+    return found
+
+
+def extract_inbound_tool_calls(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extract tool calls and the placeholders they contain across OpenAI / Anthropic / Responses."""
+    calls = []
+    # 1. OpenAI Chat
+    for choice_idx, choice in enumerate(data.get("choices") or []):
+        message = choice.get("message") or {}
+        for call_idx, call in enumerate(message.get("tool_calls") or []):
+            fn = call.get("function") or {}
+            args = fn.get("arguments", "")
+            phs = find_placeholders(args)
+            if phs:
+                calls.append({"type": "chat", "tool": fn.get("name", "tool"), "arguments": args, "placeholders": phs,
+                              "choice_idx": choice_idx, "call_idx": call_idx, "call_id": call.get("id")})
+        if isinstance(message.get("function_call"), dict):
+            args = message["function_call"].get("arguments", "")
+            phs = find_placeholders(args)
+            if phs:
+                calls.append({"type": "chat_legacy", "tool": message["function_call"].get("name", "function"),
+                              "arguments": args, "placeholders": phs, "choice_idx": choice_idx})
+    # 2. Anthropic Messages
+    for block_idx, block in enumerate(data.get("content") or []):
+        if isinstance(block, dict) and block.get("type") in AGENT_ANTHROPIC:
+            phs = find_placeholders(block.get("input", {}))
+            if phs:
+                calls.append({"type": "anthropic", "tool": block.get("name", "tool"), "arguments": block.get("input", {}),
+                              "placeholders": phs, "block_idx": block_idx, "block_id": block.get("id")})
+    # 3. Responses API
+    for item_idx, item in enumerate(data.get("output") or []):
+        if isinstance(item, dict):
+            typ = item.get("type")
+            if typ in AGENT_RESPONSES:
+                payload = item.get("action") if typ == "local_shell_call" else item.get("arguments") or item.get("input")
+                phs = find_placeholders(payload)
+                if phs:
+                    calls.append({"type": "responses", "tool": item.get("name", typ), "arguments": payload,
+                                  "placeholders": phs, "item_idx": item_idx, "item_id": item.get("id")})
+    return calls
+
+
+def block_inbound_tool_call(data: dict[str, Any], call: dict[str, Any], reason: str) -> dict[str, Any]:
+    """Replace a blocked tool call with an assistant explanation block so the turn finishes normally."""
+    output = copy.deepcopy(data)
+    notice = f"> [MasqAI] Blocked tool call `{call['tool']}`: {reason}\n"
+    typ = call.get("type")
+    if typ in ("chat", "chat_legacy"):
+        choice = output["choices"][call["choice_idx"]]
+        msg = choice.setdefault("message", {})
+        msg.pop("tool_calls", None)
+        msg.pop("function_call", None)
+        msg["role"] = "assistant"
+        msg["content"] = ((msg.get("content") or "") + "\n\n" + notice).strip()
+        choice["finish_reason"] = "stop"
+    elif typ == "anthropic":
+        blocks = output.get("content", [])
+        idx = call["block_idx"]
+        blocks[idx] = {"type": "text", "text": notice}
+        output["stop_reason"] = "end_turn"
+    elif typ == "responses":
+        items = output.get("output", [])
+        idx = call["item_idx"]
+        items[idx] = {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": notice}]}
+    return output
+
+
 def restore_response(data: dict[str, Any], table: dict[str, str]) -> dict[str, Any]:
     """A complete (non-streamed) upstream response, any of the three APIs."""
     output = copy.deepcopy(data)

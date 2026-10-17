@@ -228,11 +228,26 @@ def seed_entities(session: Session, items: Iterable[ContextItem], config: Detect
         if item.reasoning or item.opaque or not isinstance(item.original, str):
             continue
         text = item.original
-        for finding in scan(text, rules):
+        findings = scan(text, rules)
+        for finding in findings:
             add(finding.value, finding.type, f"detector:{finding.rule}", item.id)
+        # Structured tokens found by rules dominate ambient fixed identifiers (host/user/path).
+        # Do not seed a fixed identifier if it appears wholly inside a detected structured secret in this item.
+        rule_spans = []
+        for finding in findings:
+            pos = text.find(finding.value)
+            while pos != -1:
+                rule_spans.append((pos, pos + len(finding.value)))
+                pos = text.find(finding.value, pos + 1)
+
         for value, entity_type, origin in fixed:
-            if value in text:
-                add(value, entity_type, origin, item.id)
+            pos = text.find(value)
+            while pos != -1:
+                end = pos + len(value)
+                inside_rule = any(rsp[0] <= pos and end <= rsp[1] for rsp in rule_spans)
+                if not inside_rule:
+                    add(value, entity_type, origin, item.id)
+                pos = text.find(value, pos + 1)
     for value, entity_type, origin in fixed:
         if session.entity_for(value) is None:
             add(value, entity_type, origin, None)

