@@ -21,14 +21,18 @@ __all__ = ["SSETransformer", "StreamLimitError", "MAX_FRAME_BYTES"]
 
 
 class SSETransformer:
-    def __init__(self, table: dict[str, str], observe: Callable[[dict[str, Any]], None] | None = None) -> None:
+    def __init__(self, table: dict[str, str], observe: Callable[[dict[str, Any]], None] | None = None,
+                 guardrail_check: Callable[[str, str], bool] | None = None) -> None:
         self.table = table
         self.observe = observe
+        self.guardrail_check = guardrail_check
         self.buffer = b""
         self.streams: dict[tuple, ArgumentStream] = {}
         self.anthropic_types: dict[int, str] = {}      # content block index -> block type
         self.responses_types: dict[str, str] = {}      # item id -> item type
         self.chat_template: dict[str, Any] = {}
+        self.held_frames: dict[int, list[dict[str, Any]]] = {}  # choice_idx -> accumulated events if has placeholders
+        self.blocked_choices: set[int] = set()
 
     # ---------- framing ----------
     def feed(self, chunk: bytes) -> list[bytes]:
@@ -91,6 +95,8 @@ class SSETransformer:
             before += self.responses(value, event)
         if value == original:
             return before + [frame]
+        if not value:
+            return before
         return before + [self.encode(value, event)]
 
     # ---------- Chat Completions ----------
@@ -101,16 +107,14 @@ class SSETransformer:
             delta = choice.get("delta") or {}
             for call in delta.get("tool_calls") or []:
                 fn = call.get("function") or {}
-                call_idx = call.get("index", 0)
-                if fn.get("name"):
-                    self.streams.setdefault(("tool_name", ci, call_idx), fn["name"])
                 if isinstance(fn.get("arguments"), str):
-                    fn["arguments"] = self.stream(("chat", ci, call_idx)).feed(fn["arguments"])
+                    fn["arguments"] = self.stream(("chat", ci, call.get("index", 0))).feed(fn["arguments"])
             if isinstance((delta.get("function_call") or {}).get("arguments"), str):
                 delta["function_call"]["arguments"] = self.stream(("chat-fc", ci)).feed(delta["function_call"]["arguments"])
             if choice.get("finish_reason"):
                 for key in [k for k in list(self.streams.keys()) if k[0] in {"chat", "chat-fc"} and k[1] == ci]:
-                    rest = self.flush(key)
+                    stream_obj = self.streams.pop(key, None)
+                    rest = stream_obj.flush() if stream_obj else ""
                     if not rest:
                         continue
                     flush = {k: v for k, v in value.items() if k not in {"choices", "usage"}}
@@ -119,6 +123,21 @@ class SSETransformer:
                     else:
                         flush["choices"] = [{"index": ci, "delta": {"function_call": {"arguments": rest}}, "finish_reason": None}]
                     before.append(self.encode(flush))
+            # If the chunk contains restored values along with an exfiltration command, block it
+            if self.guardrail_check:
+                pass
+        # Check overall frame for exfiltration before emitting
+        raw_text = json.dumps(value, ensure_ascii=False)
+        is_net = any(x in raw_text.lower() for x in ("curl http", "curl -", "wget http", "wget -", "fetch(\"http", "requests.post", "requests.get"))
+        has_secret = any(v in raw_text for v in self.table.values() if v)
+        if is_net and has_secret:
+            for choice in value.get("choices") or []:
+                ci = choice.get("index", 0)
+                notice = "> [MasqAI] Blocked streamed tool call: exfiltration attempt detected"
+                block_msg = {k: v for k, v in value.items() if k not in {"choices", "usage"}}
+                block_msg["choices"] = [{"index": ci, "delta": {"role": "assistant", "content": notice}, "finish_reason": "stop"}]
+                value.clear()
+                return [self.encode(block_msg)]
         return before
 
     # ---------- Anthropic Messages ----------

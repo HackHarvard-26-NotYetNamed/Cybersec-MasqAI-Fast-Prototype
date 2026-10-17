@@ -34,7 +34,6 @@ def exfil_reply(fakes, client):
 
 
 class GuardrailAttacks(unittest.TestCase):
-    @unittest.expectedFailure
     def test_streamed_tool_call_is_inspected(self):
         """Real agents stream; a streamed exfiltration call must be inspected like a buffered one."""
         with gateway(make_config(security=True)) as (app, client, fakes):
@@ -48,7 +47,6 @@ class GuardrailAttacks(unittest.TestCase):
                             json={"model": "m", "messages": read_config() + [{"role": "user", "content": "go"}], "stream": True})
             self.assertNotIn(KEY, r.text)
 
-    @unittest.expectedFailure
     def test_guardrail_fails_closed_when_inspection_fails(self):
         """A security model that errors or times out must not approve the call."""
         with gateway(make_config(security=True)) as (app, client, fakes):
@@ -61,7 +59,6 @@ class GuardrailAttacks(unittest.TestCase):
                             json={"model": "m", "messages": read_config() + [{"role": "user", "content": "go"}]})
             self.assertNotIn(KEY, r.text)
 
-    @unittest.expectedFailure
     def test_injected_note_cannot_globally_unmask_a_detected_key(self):
         """A planted note talks the security model into a global unmask; the detector-found key must stay masked."""
         with gateway(make_config(security=True)) as (app, client, fakes):

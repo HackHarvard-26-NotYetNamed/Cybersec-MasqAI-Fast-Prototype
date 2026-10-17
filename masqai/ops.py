@@ -530,6 +530,8 @@ class Applier:
             raise OpError("unmask only applies to an automatic copy of a known value at exactly this position")
         # Kept strictly occurrence-bound: unmask applies only to this exact location to prevent
         # prompt injections in files or tool results from wiping a secret globally across the session.
+        if "global" in op:
+            raise OpError("unmask does not support global; unmask is strictly occurrence-bound")
         self.session.vetoes.setdefault(item.id, set()).add((start, end))
         self.session.veto_reasons[(item.id, start, end)] = _reason(op)
         return "automatic mask removed at this occurrence"
