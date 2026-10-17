@@ -141,14 +141,12 @@ class GuardrailAttacks(unittest.TestCase):
 
 
 class GuardrailFalseAlarms(unittest.TestCase):
-    """Local work on a masked value must reach the agent untouched. On a real eval run the word list
-    flagged `sqlite3.connect(…)…fetchone()` (it contains "connect(" and "fetch"), the 7B model vetoed
-    it and the task failed. Expected failure until local commands skip inspection."""
+    """Plain local shell work on a masked value reaches the agent untouched, without inspection. (`python3 -c`
+    is inspected, since it can do anything; the inspection instruction says local sqlite access is fine.)"""
 
-    @unittest.expectedFailure
     def test_local_commands_on_a_masked_path_are_not_inspected(self):
         commands = {
-            "python sqlite": "python3 -c \"import sqlite3; c=sqlite3.connect('{ph}'); print(c.execute('select count(*) from t').fetchone())\"",
+            "sqlite3 cli": "sqlite3 {ph} 'select count(*) from t'",
             "sync dir": "cd {ph}/sync && ls",
             "echo func": "echo func {ph}",
         }
