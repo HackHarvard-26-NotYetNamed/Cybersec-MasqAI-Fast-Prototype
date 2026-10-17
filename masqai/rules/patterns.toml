@@ -118,7 +118,7 @@ name = "sendgrid_key"
 type = "SENDGRID_KEY"
 regex = 'SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}'
 
-# scheme://user:password@host: only the user:password part.
+# Credentials inside a URL (scheme, then user and password before the @): only that user/password part.
 [[rule]]
 name = "url_credentials"
 type = "CREDENTIAL"

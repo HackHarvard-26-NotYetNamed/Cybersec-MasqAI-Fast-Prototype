@@ -40,7 +40,8 @@ class Fakes:
         self.security_calls: list[dict[str, Any]] = []
         self.upstream: Callable[[httpx.Request], httpx.Response] = lambda r: httpx.Response(
             200, json={"choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]})
-        # Each call pops the next answer: a list of operations, a raw string, or an httpx.Response.
+        # Each call pops the next answer: a list of operations, a raw string, an httpx.Response, or a
+        # function of the security model's input returning one of those.
         self.security_answers: list[Any] = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
@@ -48,6 +49,8 @@ class Fakes:
             body = json.loads(request.content)
             self.security_calls.append(body)
             answer = self.security_answers.pop(0) if self.security_answers else []
+            if callable(answer):   # a function of the security model's input (the user message JSON)
+                answer = answer(json.loads(body["messages"][-1]["content"]))
             if isinstance(answer, httpx.Response):
                 return answer
             content = answer if isinstance(answer, str) else json.dumps({"operations": answer})

@@ -193,25 +193,29 @@ Remove-Item Env:LEDGER_JDK -ErrorAction SilentlyContinue"""
 
 
 def masq_config(model: str, security: str, security_model: str | None) -> dict:
+    """MasqAI config (v2 schema) routing agent traffic through the relay."""
     providers = [{"name": "relay", "base_url": "http://127.0.0.1:8788", "format": "openai", "headers": {}}]
     if security == "ollama":
         providers.append({"name": "ollama-local", "base_url": "http://127.0.0.1:11434", "format": "openai", "headers": {}})
-        sec = {"provider": "ollama-local", "model": security_model or "qwen2.5:7b", "context_mode": "recent", "timeout_seconds": 180}
+        sec = {"provider": "ollama-local", "model": security_model or "qwen2.5:7b", "timeout_s": 180,
+               "allow_remote_security_model": False}
     else:
         # A *different* provider than the agent's upstream. It still sees raw context: see README.
         providers.append({"name": "openrouter-security", "base_url": "https://openrouter.ai/api",
                           "api_key_env": "OPENROUTER_API_KEY", "format": "openai", "headers": {}})
-        sec = {"provider": "openrouter-security", "model": security_model or model, "context_mode": "recent", "timeout_seconds": 90}
+        sec = {"provider": "openrouter-security", "model": security_model or model, "timeout_s": 90,
+               "allow_remote_security_model": True}
     return {
         "host": "127.0.0.1", "port": 8787, "upstream_timeout_seconds": 300,
         "providers": providers,
         "routes": {},
         "default_route": {"provider": "relay", "model": None},
-        "security": {"enabled": True, "api_format": "openai", "recent_items": 12, "system_prompt": "", **sec},
+        "pass_unknown": False,
+        "security": {"enabled": True, "api_format": "openai", "context_mode": "recent", "recent_items": 12,
+                     "auto_mask": "auto_veto", "system_prompt": "", **sec},
         "detectors": {"custom_values": [], "detect_host_identifiers": True},
-        "headers": {"mode": "blocklist", "blocklist": ["api-key", "x-goog-api-key", "cookie"],
-                    "allowlist": ["accept", "content-type", "user-agent"]},
-        "allow_remote_security_model": security != "ollama",
+        "headers": {"mode": "blocklist", "user_agent": "masqai/0.2.0"},
+        "retention": {"idle_ttl_h": 12, "max_sessions": 50},
     }
 
 

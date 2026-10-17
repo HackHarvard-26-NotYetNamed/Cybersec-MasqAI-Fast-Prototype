@@ -29,12 +29,20 @@ BLACKHOLE = "masq-playground-blackhole"   # security provider at an unrouted URL
 SAVED = STATE / "security-before-break.json"
 
 
+def admin_headers() -> dict:
+    """MasqAI's control API needs the admin token printed at startup (MASQAI_ADMIN_TOKEN=…)."""
+    token = os.getenv("MASQAI_ADMIN_TOKEN")
+    if not token:
+        sys.exit("set MASQAI_ADMIN_TOKEN to the token MasqAI printed when it started")
+    return {"x-masqai-token": token}
+
+
 def get_config() -> dict:
-    return httpx.get(f"{MASQ}/api/config", timeout=5).raise_for_status().json()
+    return httpx.get(f"{MASQ}/api/config", headers=admin_headers(), timeout=5).raise_for_status().json()
 
 
 def put_config(config: dict) -> None:
-    response = httpx.post(f"{MASQ}/api/config", json=config, timeout=10)
+    response = httpx.post(f"{MASQ}/api/config", json=config, headers=admin_headers(), timeout=10)
     if response.status_code != 200:
         sys.exit(f"MasqAI rejected the change: {response.text}")
 

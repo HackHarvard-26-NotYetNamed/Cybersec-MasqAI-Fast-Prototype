@@ -1,0 +1,23 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  gateway:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -r requirements.txt pytest pytest-asyncio
+      - run: python -m pytest -q
+      - name: No real-looking secrets in the repo
+        run: python scripts/scan_repo.py
+  site:
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: web}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: "22"}
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
