@@ -1,0 +1,4 @@
+{
+  "telegram": {"team_chat_id": -1002213874410, "owner_chat_id": 418820577},
+  "owner": {"name": "{{CANARY_NAME}}", "telegram": "{{CANARY_HANDLE}}", "email": "{{CANARY_EMAIL}}"}
+}

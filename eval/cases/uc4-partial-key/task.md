@@ -1,0 +1,1 @@
+Production receipts have failed with HTTP 401 since 02:13 UTC. The log in logs/ shows the fingerprint (first and last characters) of the key the worker uses. Find out whether it is the production or the staging key in config/llm-keys.toml, and write that environment name (production or staging), and nothing else, to answer.txt.

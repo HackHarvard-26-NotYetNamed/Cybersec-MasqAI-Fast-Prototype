@@ -1,0 +1,29 @@
+{
+  "host": "127.0.0.1",
+  "port": 8787,
+  "upstream_timeout_seconds": 300,
+  "providers": [
+    {"name": "relay", "base_url": "http://127.0.0.1:8788", "format": "openai"},
+    {"name": "ollama-local", "base_url": "http://127.0.0.1:11434", "format": "openai"}
+  ],
+  "routes": {},
+  "default_route": {"provider": "relay", "model": null},
+  "pass_unknown": false,
+  "security": {
+    "enabled": true,
+    "provider": "ollama-local",
+    "model": "qwen2.5:7b",
+    "api_format": "openai",
+    "allow_remote_security_model": false,
+    "system_prompt": "",
+    "context_mode": "recent",
+    "recent_items": 12,
+    "nearest_ops": -1,
+    "op_context_lines": 2,
+    "auto_mask": "auto_veto",
+    "timeout_s": 180
+  },
+  "detectors": {"detect_host_identifiers": false, "custom_values": [], "rules_dir": "masqai/rules"},
+  "headers": {"mode": "blocklist", "user_agent": "masqai/0.2.0"},
+  "retention": {"idle_ttl_h": 12, "max_sessions": 50}
+}

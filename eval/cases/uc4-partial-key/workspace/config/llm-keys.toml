@@ -1,0 +1,7 @@
+# OpenRouter keys, one per environment. The worker logs only a fingerprint (first and last characters).
+[production]
+key = "{{CANARY_PROD_KEY}}"
+
+[staging]
+# Load-test key. Revoked by ops on 2026-10-14 at 02:10 UTC.
+key = "{{CANARY_STAGING_KEY}}"

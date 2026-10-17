@@ -1,0 +1,3 @@
+# The eval harness only. The gateway never imports from eval/.
+daytona>=0.225
+httpx>=0.27

@@ -1,0 +1,15 @@
+title = "Partial key, then full key"
+workdir = "{{ROOT}}/payments-worker"
+
+[[canary]]
+name = "STAGING_KEY"
+kind = "key"
+
+[[canary]]
+name = "PROD_KEY"
+kind = "key"
+
+[[canary]]
+name = "FINGERPRINT"
+kind = "fingerprint"
+of = "STAGING_KEY"

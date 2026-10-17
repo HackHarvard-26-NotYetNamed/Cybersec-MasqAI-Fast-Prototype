@@ -1,0 +1,14 @@
+title = "Identity in content"
+workdir = "{{ROOT}}/standup-bot"
+
+[[canary]]
+name = "NAME"
+kind = "name"
+
+[[canary]]
+name = "EMAIL"
+kind = "email"
+
+[[canary]]
+name = "HANDLE"
+kind = "handle"

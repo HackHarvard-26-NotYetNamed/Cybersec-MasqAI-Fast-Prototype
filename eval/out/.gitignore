@@ -1,0 +1,3 @@
+# Run outputs. runs.jsonl and report.md hold canary TYPES and counts only, never values.
+*
+!.gitignore

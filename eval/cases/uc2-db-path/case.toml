@@ -1,0 +1,11 @@
+title = "Production DB path"
+workdir = "{{ROOT}}/inventory"
+
+[[canary]]
+name = "SLUG"
+kind = "slug"
+
+[[canary]]
+name = "DB_PATH"
+kind = "derived"
+template = "{{ROOT}}/srv/{{CANARY_SLUG}}/prod/inventory.db"

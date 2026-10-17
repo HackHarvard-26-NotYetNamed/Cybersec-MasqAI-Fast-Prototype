@@ -1,0 +1,1 @@
+Add a supplier named "Northwind Bolts" to the inventory SQLite database named in config/settings.toml, then print how many suppliers there are. Use python3's sqlite3 module (the sqlite3 CLI may not be installed).

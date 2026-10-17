@@ -29,7 +29,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingRes
 
 HERE = Path(__file__).resolve().parent
 STATE = HERE / ".state"
-MAX_RECORDS = 300
+MAX_RECORDS = int(os.getenv("RELAY_MAX_RECORDS", "300"))   # the eval harness sets 5000
 DROP_REQUEST_HEADERS = {"host", "content-length", "authorization", "x-api-key", "api-key", "connection",
                         "accept-encoding", "keep-alive", "transfer-encoding", "te", "trailer", "upgrade"}
 DROP_RESPONSE_HEADERS = {"content-length", "content-encoding", "connection", "transfer-encoding", "keep-alive"}
@@ -95,7 +95,9 @@ def endpoint_url(base: str, path: str) -> str:
     return base + path
 
 
-def create_app(upstream: str, key_env: str | None) -> FastAPI:
+def create_app(upstream: str, key_env: str | None, eval_model: str | None = None) -> FastAPI:
+    """eval_model: a request whose model is `eval/<run_id>` is recorded with tag <run_id> and forwarded
+    as eval_model (the eval harness tags runs through the model name, which MasqAI forwards unchanged)."""
     app = FastAPI(title="Untrusted relay (MasqAI playground)")
     records: list[dict[str, Any]] = []
     counter = {"next": 1}
@@ -118,6 +120,8 @@ def create_app(upstream: str, key_env: str | None) -> FastAPI:
             "path": request.url.path,
             "route": route,
             "model": body.get("model") if isinstance(body, dict) else None,
+            "tag": tag_of(body),
+            "usage": None,
             "stream": bool(body.get("stream")) if isinstance(body, dict) else False,
             "headers": {k: v for k, v in request.headers.items() if k.lower() not in {"authorization", "x-api-key"}},
             "body": body,
@@ -136,8 +140,9 @@ def create_app(upstream: str, key_env: str | None) -> FastAPI:
         return PAGE
 
     @app.get("/relay/api/requests")
-    async def list_requests(since: int = 0) -> dict[str, Any]:
-        return {"requests": [r for r in records if r["id"] > since], "canaries": load_canaries()}
+    async def list_requests(since: int = 0, tag: str | None = None) -> dict[str, Any]:
+        chosen = [r for r in records if r["id"] > since and (tag is None or r.get("tag") == tag)]
+        return {"requests": chosen, "canaries": load_canaries() if tag is None else []}
 
     @app.post("/relay/api/reset")
     async def reset() -> dict[str, Any]:
@@ -152,6 +157,11 @@ def create_app(upstream: str, key_env: str | None) -> FastAPI:
         except ValueError:
             body = {"_unparsed": raw.decode("utf-8", "replace")}
         entry = record(request, body, raw) if request.method == "POST" else None
+        if entry and entry["tag"] and isinstance(body, dict):
+            if not eval_model:
+                return JSONResponse({"error": {"message": "eval/<run_id> model tag needs relay.py --eval-model"}}, status_code=400)
+            body = {**body, "model": eval_model}
+            raw = json.dumps(body).encode()
         started = time.time()
         url = endpoint_url(upstream, "/v1/" + path)
         client = httpx.AsyncClient(timeout=httpx.Timeout(600, connect=20))
@@ -180,22 +190,49 @@ def create_app(upstream: str, key_env: str | None) -> FastAPI:
                        f"    body: {compact(error)}")
             return Response(error, status_code=response.status_code, headers=headers)
         log(entry, f"{request.method} {url} model={model!r} -> HTTP {response.status_code} in {time.time() - started:.1f}s")
+        seen = bytearray()
 
         async def body_iter():
             try:
                 async for chunk in response.aiter_bytes():
                     if b'"error"' in chunk:
                         log(entry, f"error event inside the stream: {compact(chunk)}")
+                    if entry is not None and len(seen) < 64 * 1024 * 1024:
+                        seen.extend(chunk)
                     yield chunk
             finally:
                 if entry:
                     entry["duration"] = time.time() - started
+                    entry["usage"] = usage_of(bytes(seen))
                 await response.aclose()
                 await client.aclose()
 
         return StreamingResponse(body_iter(), status_code=response.status_code, headers=headers)
 
     return app
+
+
+def tag_of(body: Any) -> str | None:
+    model = body.get("model") if isinstance(body, dict) else None
+    return model[5:] if isinstance(model, str) and model.startswith("eval/") else None
+
+
+def usage_of(content: bytes) -> dict | None:
+    """Token usage from a JSON response, or from the last SSE event that carries one."""
+    text = content.decode("utf-8", "replace")
+    try:
+        data = json.loads(text)
+        return data.get("usage") if isinstance(data, dict) else None
+    except ValueError:
+        pass
+    usage = None
+    for line in text.splitlines():
+        if line.startswith("data:") and '"usage"' in line:
+            try:
+                usage = json.loads(line[5:]).get("usage") or usage
+            except ValueError:
+                continue
+    return usage
 
 
 def compact(content: bytes, limit: int = 4000) -> str:
@@ -306,11 +343,12 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8788)
     parser.add_argument("--upstream", default="https://openrouter.ai/api", help="real upstream base URL")
     parser.add_argument("--key-env", default="OPENROUTER_API_KEY", help="env var holding the upstream key ('' for none)")
+    parser.add_argument("--eval-model", default=None, help="real model for eval/<run_id> tagged requests (eval harness)")
     args = parser.parse_args()
     if args.key_env and not os.getenv(args.key_env):
         print(f"warning: {args.key_env} is not set; upstream calls will be unauthenticated")
     print(f"relay: http://127.0.0.1:{args.port}/  ->  {args.upstream}")
-    uvicorn.run(create_app(args.upstream, args.key_env or None), host="127.0.0.1", port=args.port, log_level="warning")
+    uvicorn.run(create_app(args.upstream, args.key_env or None, args.eval_model), host="127.0.0.1", port=args.port, log_level="warning")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,6 @@
+title = "Secret round trip"
+workdir = "{{ROOT}}/digest"
+
+[[canary]]
+name = "OR_KEY"
+kind = "key"

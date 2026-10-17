@@ -1,0 +1,1 @@
+{ "service": "payments-worker", "key_ref": "staging", "replicas": 2 }

@@ -1,0 +1,8 @@
+# Acme inventory runtime settings. Owned by ops.
+[service]
+name = "acme-inventory"
+environment = "production"
+
+[database]
+# Production SQLite file on the warehouse box.
+path = '{{CANARY_DB_PATH}}'
