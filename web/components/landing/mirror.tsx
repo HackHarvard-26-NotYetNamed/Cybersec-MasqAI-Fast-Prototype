@@ -9,7 +9,7 @@ import type { ChipType } from "@/lib/ops";
 type Seg = string | { value: string; placeholder: string; type: ChipType };
 type Line = { segs: Seg[] } | { intel: string; summary: string };
 
-// Synthetic values from the playground.
+// Synthetic values from the playground. Entrances animate scale/blur, never opacity, so text keeps full contrast.
 const LINES: Line[] = [
   { segs: ["$ sqlite3 \"", { value: "C:\\Users\\alice\\AppData\\Local\\AcmeInventory\\prod\\inventory.db", placeholder: "<PATH_b71e04d2>", type: "PATH" }, "\""] },
   { segs: ["API_KEY = \"", { value: "sk-or-v1-FAKEFAKE5e2b7a90c4d1", placeholder: "<OR_KEY_30b6eebf>", type: "KEY" }, "\""] },
@@ -75,14 +75,14 @@ export function MirrorHero() {
                   <motion.span
                     key="bar"
                     className="block"
-                    initial={reduce ? false : { opacity: 0, filter: "blur(6px)", scale: 1.04 }}
-                    animate={{ opacity: 1, filter: "blur(0px)", scale: 1 }}
+                    initial={reduce ? false : { filter: "blur(6px)", scale: 1.04 }}
+                    animate={{ filter: "blur(0px)", scale: 1 }}
                     transition={{ duration: 0.6 }}
                   >
                     <HiddenBar summary={line.summary} />
                   </motion.span>
                 ) : (
-                  <motion.span key="pending" exit={{ opacity: 0 }} className="text-muted-foreground">
+                  <motion.span key="pending" className="text-muted-foreground">
                     {"·".repeat(24)}
                   </motion.span>
                 )}
@@ -96,15 +96,15 @@ export function MirrorHero() {
                     {i < crossed ? (
                       <motion.span
                         key="chip"
-                        initial={reduce ? false : { opacity: 0, scale: 0.8 }}
-                        animate={{ opacity: 1, scale: 1 }}
+                        initial={reduce ? false : { scale: 0.6 }}
+                        animate={{ scale: 1 }}
                         transition={{ duration: 0.35, delay: j * 0.08 }}
                         className="inline-block"
                       >
                         <PlaceholderChip placeholder={seg.placeholder} type={seg.type} />
                       </motion.span>
                     ) : (
-                      <motion.span key="pending" exit={{ opacity: 0 }} className="text-muted-foreground">
+                      <motion.span key="pending" className="text-muted-foreground">
                         {"·".repeat(Math.min(12, seg.placeholder.length))}
                       </motion.span>
                     )}

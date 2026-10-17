@@ -165,9 +165,11 @@ function Watermark() {
       </p>
       {/* One large diagonal mark across the viewport, behind nothing interactive. */}
       <div aria-hidden className="pointer-events-none fixed inset-0 z-30 flex items-center justify-center overflow-hidden select-none">
-        <span className="-rotate-[28deg] font-mono text-[clamp(2.25rem,7vw,6.5rem)] font-black tracking-wider whitespace-nowrap text-foreground opacity-[0.07]">
-          {WATERMARK}
-        </span>
+        {/* Drawn with a pseudo-element: purely visual, the banner above carries the same text. */}
+        <span
+          data-text={WATERMARK}
+          className="-rotate-[28deg] font-mono text-[clamp(2.25rem,7vw,6.5rem)] font-black tracking-wider whitespace-nowrap text-foreground opacity-[0.07] before:content-[attr(data-text)]"
+        />
       </div>
     </>
   );
