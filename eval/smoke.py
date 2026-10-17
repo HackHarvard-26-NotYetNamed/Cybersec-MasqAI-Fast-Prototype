@@ -30,7 +30,7 @@ async def smoke(case_id: str, sandbox: str, self_test: bool) -> int:
                 expect = row["leaked_count"] > 0 if condition == "raw" else (row["task_ok"] and row["leaked_count"] == 0)
                 ok &= bool(expect) and not row["error"]
                 print(f"{'PASS' if expect and not row['error'] else 'FAIL'}  {condition:6} task_ok={row['task_ok']} leaked={row['leaked'] or '-'} "
-                      f"relay_requests={row['relay_requests']} blocked={row['blocked']}" + (f" error={row['error']}" if row["error"] else ""))
+                      f"relay_requests={row['relay_requests']} blocked={row['blocked']} tool_calls_blocked={row.get('tool_calls_blocked', 0)}" + (f" error={row['error']}" if row["error"] else ""))
         finally:
             await backend.close()
     print(f"{'PASS' if ok else 'FAIL'} in {time.monotonic() - started:.0f} s ({backend.name})")

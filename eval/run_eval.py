@@ -44,6 +44,7 @@ async def one_run(case: Case, condition: str, backend, http: httpx.AsyncClient) 
     run_id = f"{case.id}.{condition}.{secrets.token_hex(4)}"
     row: dict[str, Any] = {"run_id": run_id, "case": case.id, "condition": condition, "task_ok": False, "leaked": [],
                            "leaked_count": 0, "canary_count": 0, "relay_requests": 0, "blocked": False, "block_status": None,
+                           "tool_calls_blocked": 0,
                            "prompt_tokens": 0, "completion_tokens": 0, "wall_ms": 0, "llm_ms_p50": None, "turns": 0, "error": None}
     sandbox = await backend.create(run_id)
     canaries = []
@@ -70,6 +71,7 @@ async def one_run(case: Case, condition: str, backend, http: httpx.AsyncClient) 
         row["wall_ms"] = round((time.monotonic() - started) * 1000)
         row["turns"] = result.turns
         row["blocked"], row["block_status"] = result.blocked, result.block_status
+        row["tool_calls_blocked"] = result.tool_calls_blocked
         row["error"] = result.error
         row["llm_ms_p50"] = round(statistics.median(result.llm_ms)) if result.llm_ms else None
         # check.sh arrives only now, so the agent could never read the expected answer.

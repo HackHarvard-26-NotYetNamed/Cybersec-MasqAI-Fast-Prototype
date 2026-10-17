@@ -62,13 +62,13 @@ def report(rows: list[dict[str, Any]], results: dict[str, Any]) -> str:
         lines += ["> Self-test data (scripted fake model, local sandbox). Not measurements.", ""]
     for case in results["cases"]:
         lines += [f"## {case['id']}: {case['title']}", "",
-                  "| condition | runs | leak rate | task success | blocked | avg prompt tokens | p50 LLM call |",
-                  "|---|---|---|---|---|---|---|"]
+                  "| condition | runs | leak rate | task success | blocked | tool calls vetoed | avg prompt tokens | p50 LLM call |",
+                  "|---|---|---|---|---|---|---|---|"]
         for condition in ("raw", "masqai"):
             runs = [r for r in rows if r["case"] == case["id"] and r["condition"] == condition]
             m = case[condition]
             lines.append(f"| {condition} | {len(runs)} | {m['leakRate']:.0%} | {m['taskSuccess']:.0%} | "
-                         f"{sum(r['blocked'] for r in runs)} | {m['avgTokens']} | {m['p50LatencyMs']} ms |")
+                         f"{sum(r['blocked'] for r in runs)} | {sum(r.get('tool_calls_blocked', 0) for r in runs)} | {m['avgTokens']} | {m['p50LatencyMs']} ms |")
         lines.append("")
     worst = sorted((r for r in rows if r["condition"] == "masqai"),
                    key=lambda r: (-r["leaked_count"], r["task_ok"], -(r["blocked"])))[:3]

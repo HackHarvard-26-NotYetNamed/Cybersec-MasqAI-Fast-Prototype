@@ -14,6 +14,9 @@ from .sandbox import Sandbox
 MAX_TURNS = 12
 COMMAND_TIMEOUT_S = 120
 RUN_TIMEOUT_S = 15 * 60
+# Without a cap, OpenRouter reserves the model's maximum output (65k tokens) against the balance and answers 402.
+MAX_TOKENS = 2048
+GUARD_NOTICE = "[MasqAI] Blocked tool call"
 SYSTEM = ("You are a coding agent working in a Linux sandbox. Use the bash tool to inspect and change files in the "
           "current directory. Work step by step and verify your work. When the task is done, reply with a short summary "
           "and no tool call.")
@@ -30,6 +33,8 @@ class AgentResult:
     turns: int = 0
     blocked: bool = False
     block_status: int | None = None
+    # MasqAI's inbound guardrail answers a vetoed tool call with a normal assistant message, not an HTTP error.
+    tool_calls_blocked: int = 0
     error: str | None = None
     llm_ms: list[float] = field(default_factory=list)
     commands: int = 0
@@ -44,7 +49,8 @@ async def run_agent(client: httpx.AsyncClient, base_url: str, model: str, header
         result.turns += 1
         started = time.monotonic()
         response = await client.post(f"{base_url}/chat/completions", headers=headers,
-                                     json={"model": model, "messages": messages, "tools": TOOLS, "temperature": 0})
+                                     json={"model": model, "messages": messages, "tools": TOOLS, "temperature": 0,
+                                           "max_tokens": MAX_TOKENS})
         result.llm_ms.append((time.monotonic() - started) * 1000)
         if response.status_code != 200:
             kind = _error_type(response)
@@ -58,6 +64,7 @@ async def run_agent(client: httpx.AsyncClient, base_url: str, model: str, header
         calls = message.get("tool_calls") or []
         messages.append({k: v for k, v in message.items() if k in {"role", "content", "tool_calls"}} | {"role": "assistant"})
         if not calls:
+            result.tool_calls_blocked += (message.get("content") or "").count(GUARD_NOTICE)
             return result
         for call in calls:
             try:
