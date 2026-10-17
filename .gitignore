@@ -45,3 +45,4 @@ playground/uc3-secret-roundtrip/config/secrets.json
 # Logs (keep the playground fixture log)
 *.log
 !playground/uc4-partial-key/logs/*.log
+!eval/cases/*/workspace/logs/*.log

@@ -1,0 +1,3 @@
+2026-10-14T02:09:58Z INFO  receipt r-88412 ok key={{CANARY_FINGERPRINT}}
+2026-10-14T02:13:04Z ERROR receipt r-88419 upstream 401 "User not found" key={{CANARY_FINGERPRINT}}
+2026-10-14T02:13:09Z ERROR receipt r-88419 failed after 3 attempts
