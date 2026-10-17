@@ -9,6 +9,11 @@ const LIVE = process.env.NEXT_PUBLIC_LIVE_MODE === "true" && process.env.NODE_EN
 const GATEWAY = "http://127.0.0.1:8787";
 
 const nextConfig: NextConfig = {
+  // In live mode, don't gzip responses: compression buffers the proxied event stream. Vercel
+  // compresses at its edge regardless, so this never affects the deployed site.
+  compress: !LIVE,
+  // The event stream is long-lived; the proxy's default 30 s timeout would cut it.
+  ...(LIVE ? { experimental: { proxyTimeout: 24 * 60 * 60 * 1000 } } : {}),
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {
