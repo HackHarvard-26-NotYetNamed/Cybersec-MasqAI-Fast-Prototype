@@ -15,6 +15,7 @@ from pathlib import Path
 
 from .model import ContextItem, HideOp, MaskOp, ReplaceOp, Session
 from .ops import Applier, address, line_of, line_starts, numbered, placeholder, plan_all
+from .policy import model_policy
 from .trace import Trace
 
 PROMPT_FILE = Path(__file__).parent / "prompts" / "security.md"
@@ -103,7 +104,7 @@ class Sanitizer:
     async def _sanitize(self, session: Session, items: list[ContextItem], trace: Trace) -> None:
         started = time.monotonic()
         trace.update(stage="detectors")
-        found = seed_entities(session, items, self.config.detectors)
+        found = seed_entities(session, items, self.config.detectors, self.config.protect.model_dump())
         # Known values (detector hits and earlier masks) are applied everywhere, including system
         # prompts and tool descriptions, at token boundaries only.
         plan_all(session, items)
@@ -127,7 +128,8 @@ class Sanitizer:
         spans_before = {item.id: list(item.spans) for item in items}
         entities_before = set(session.entities)
         payload = self._input(session, items, new_items, spans_before)
-        applier = Applier(session, items, self.config.security.auto_mask == "auto_veto", session.request_count)
+        applier = Applier(session, items, self.config.security.auto_mask == "auto_veto", session.request_count,
+                          self.config.protect.model_dump())
         messages = [{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]
         trace.security(input=payload, attempts=[])
         results: list[dict[str, Any]] = []
@@ -276,7 +278,8 @@ class Sanitizer:
             elif aliases := session.alias_texts(e.token):
                 entry["alias_texts"] = aliases
             mapping.append(entry)
-        res = {"new_items": [describe(item) for item in new_items], "existing_operations": [e[3] for e in existing],
+        res = {"policy": model_policy(self.config.protect.model_dump()),
+               "new_items": [describe(item) for item in new_items], "existing_operations": [e[3] for e in existing],
                "mapping": mapping, "conversation": conversation, "recent_tool_context": recent}
         if retroactive_auto_masks:
             res["retroactive_auto_masks"] = retroactive_auto_masks

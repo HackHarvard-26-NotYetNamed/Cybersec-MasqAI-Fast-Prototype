@@ -65,6 +65,12 @@ See [`masqai.json.example`](masqai.json.example). Unknown keys are rejected at l
   a wrong automatic mask), `tool_rejection` (`rewrite`, the default: a rejected tool call runs a harmless `echo` of the
   rejection instead; `error`: HTTP 400 `masqai_tool_rejected`), and `system_prompt` (empty = the built-in [`masqai/prompts/security.md`](masqai/prompts/security.md);
   a prompt written for the prototype's `collapse` op is rejected).
+- **protect**: what counts as secret, chosen category by category (no presets; all `true` by default, also on the
+  GUI's Settings page under "What to protect"). Secrets, masked: `credentials`, `file_paths`, `machine_identity`,
+  `emails`, `people`. Intel, hidden or replaced: `locations`, `infrastructure`, `documents`, `messages`. A category set
+  to `false` is not looked for by the detectors, the security model is told to leave it alone, and any operation the
+  model still proposes for it is ignored. Types MasqAI can't place in a category, and custom values, are always masked.
+  The mapping is in [`masqai/policy.py`](masqai/policy.py).
 - **detectors**: `detect_host_identifiers` (hostname, OS username, home paths), `custom_values` (names, handles, emails
   to always mask), `rules_dir` (rule tables, default [`masqai/rules`](masqai/rules)).
 - **headers**: blocklist mode by default. Always dropped: the client's credentials, `x-masqai-*` and hop-by-hop headers.

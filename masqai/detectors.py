@@ -17,6 +17,7 @@ from typing import Iterable, Iterator
 
 from .config import DetectorConfig
 from .model import ContextItem, Entity, Session
+from .policy import protected
 
 PACKAGE_RULES = Path(__file__).parent / "rules"
 MIN_VALUE_LENGTH = 3
@@ -206,7 +207,8 @@ def host_values() -> list[tuple[str, str]]:
     return [(t, v) for t, v in values if v and len(v) >= MIN_VALUE_LENGTH]
 
 
-def seed_entities(session: Session, items: Iterable[ContextItem], config: DetectorConfig) -> list[Entity]:
+def seed_entities(session: Session, items: Iterable[ContextItem], config: DetectorConfig,
+                  protect: dict[str, bool] | None = None) -> list[Entity]:
     """Add every detector hit to the session mapping. Exact copies are then masked automatically (at
     word boundaries) by ops.plan_item. Returns the entities created by this call."""
     rules = load_rules(config.rules_dir)
@@ -220,9 +222,11 @@ def seed_entities(session: Session, items: Iterable[ContextItem], config: Detect
         if item_id:
             entity.detected_in.add(item_id)
 
+    selection = protect or {}
     fixed: list[tuple[str, str, str]] = []
     if config.detect_host_identifiers:
-        fixed += [(v, t, "detector:host") for t, v in host_values()]
+        # Only the categories the user protects (policy.py); custom values below are always masked.
+        fixed += [(v, t, "detector:host") for t, v in host_values() if protected(selection, t)]
     fixed += [(c.value, c.type.upper(), "detector:custom") for c in config.custom_values]
     for item in items:
         if item.reasoning or item.opaque or not isinstance(item.original, str):
@@ -230,7 +234,8 @@ def seed_entities(session: Session, items: Iterable[ContextItem], config: Detect
         text = item.original
         findings = scan(text, rules)
         for finding in findings:
-            add(finding.value, finding.type, f"detector:{finding.rule}", item.id)
+            if protected(selection, finding.type):
+                add(finding.value, finding.type, f"detector:{finding.rule}", item.id)
         # Structured tokens found by rules dominate ambient fixed identifiers (host/user/path).
         # Do not seed a fixed identifier if it appears wholly inside a detected structured secret in this item.
         rule_spans = []

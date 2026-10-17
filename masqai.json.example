@@ -26,6 +26,10 @@
     "timeout_s": 60,
     "context_tokens": 4096
   },
+  "protect": {
+    "credentials": true, "file_paths": true, "machine_identity": true, "emails": true, "people": true,
+    "locations": true, "infrastructure": true, "documents": true, "messages": true
+  },
   "detectors": {"detect_host_identifiers": true, "custom_values": [], "rules_dir": "masqai/rules"},
   "headers": {"mode": "blocklist", "user_agent": "masqai/0.2.0"},
   "retention": {"idle_ttl_h": 12, "max_sessions": 50}

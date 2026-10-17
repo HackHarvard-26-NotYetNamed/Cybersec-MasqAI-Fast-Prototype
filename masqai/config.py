@@ -186,6 +186,22 @@ class DetectorConfig(BaseModel):
     rules_dir: str = "masqai/rules"
 
 
+class ProtectConfig(BaseModel):
+    """What to protect, chosen by the user category by category (see masqai/policy.py). Off = values of that
+    category are sent as they are. Custom values are always masked."""
+    model_config = ConfigDict(extra="forbid")
+
+    credentials: bool = True
+    file_paths: bool = True
+    machine_identity: bool = True
+    emails: bool = True
+    people: bool = True
+    locations: bool = True
+    infrastructure: bool = True
+    documents: bool = True
+    messages: bool = True
+
+
 class RetentionConfig(BaseModel):
     """Sessions live in RAM only. Idle ones expire; past the cap the least recently used goes first.
     A session with a request in flight or an open stream is never evicted."""
@@ -267,6 +283,7 @@ class GatewayConfig(BaseModel):
     default_route: ModelRoute | None = None
     security: SecurityModelConfig = Field(default_factory=SecurityModelConfig)
     detectors: DetectorConfig = Field(default_factory=DetectorConfig)
+    protect: ProtectConfig = Field(default_factory=ProtectConfig)
     headers: HeaderPolicy = Field(default_factory=HeaderPolicy)
     retention: RetentionConfig = Field(default_factory=RetentionConfig)
     # Content types MasqAI can't inspect (images in OpenAI format, files, audio, ...): false refuses the

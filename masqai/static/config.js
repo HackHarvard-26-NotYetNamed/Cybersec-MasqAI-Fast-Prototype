@@ -305,6 +305,25 @@ const ConfigPanel = (() => {
         remote));
   }
 
+  function protectSection() {
+    const p = ui.protect;
+    const categories = meta.protect_categories || [];
+    const group = (kind, title, what) => h("div", { class: "card" },
+      h("p", null, b(title), " ", h("span", { class: "help" }, what)),
+      categories.filter((c) => c.kind === kind).map((c) => field(c.label, `protect.${c.id}`,
+        checkbox(p, c.id, c.description, { rerender: true }))));
+    const notes = [];
+    if (p.credentials === false)
+      notes.push(h("div", { class: "warn" }, "Credentials are off: API keys, tokens and passwords will reach the untrusted model as they are. Values you list under Detectors → Custom values are still masked."));
+    const off = categories.filter((c) => p[c.id] === false).map((c) => c.label);
+    return section("protect", "What to protect",
+      "Choose, category by category, what MasqAI keeps from the untrusted model. There are no presets: tick what counts as secret for you. A category that is off is not looked for by the detectors, the security model is told to leave it alone, and any mask, hide or replace the model proposes for it anyway is ignored. Applies to values found from now on; masks a session already has stay until it is forgotten.",
+      ...notes,
+      group("secret", "Secrets", "are masked: the untrusted model sees a placeholder, and your agent's tool calls get the real value back."),
+      group("intel", "Intel", "is hidden or replaced in tool results: lossy, never restored."),
+      h("p", { class: "help" }, off.length ? `Sent as they are: ${off.join(", ")}.` : "Everything is protected (the default). Values of a type MasqAI can't place in a category are always protected."));
+  }
+
   function detectorsSection() {
     const d = ui.detectors;
     const matching = "";
@@ -396,7 +415,7 @@ const ConfigPanel = (() => {
   function render() {
     if (!ui) return;
     const scroll = window.scrollY;
-    form.replaceChildren(providersSection(), routingSection(), securitySection(), detectorsSection(), headersSection(), sessionsSection(), gatewaySection());
+    form.replaceChildren(providersSection(), routingSection(), protectSection(), securitySection(), detectorsSection(), headersSection(), sessionsSection(), gatewaySection());
     const unplaced = errors.filter((e) => !placeError(e));
     const counts = {};
     for (const e of errors) counts[sectionOf(e.loc)] = (counts[sectionOf(e.loc)] || 0) + 1;

@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .model import ContextItem, Entity, HideOp, MaskOp, ReplaceOp, Session
+from .policy import BY_ID, category_of, protected
 
 MIN_AUTO_LENGTH = 3        # shorter canonical values are masked only where an operation points
 MAX_SUMMARY = 200          # hide summaries and replace substitutes
@@ -350,14 +351,23 @@ def _reason(op: dict[str, Any]) -> str | None:
 class Applier:
     """Validates operations one by one and applies the valid ones to the session."""
 
-    def __init__(self, session: Session, items: list[ContextItem], allow_veto: bool, request: int) -> None:
+    def __init__(self, session: Session, items: list[ContextItem], allow_veto: bool, request: int,
+                 protect: dict[str, bool] | None = None) -> None:
         self.session = session
+        self.protect = protect or {}     # the user's categories (policy.py); missing = protected
         self.items = items
         self.refs = {f"#{i + 1}": item for i, item in enumerate(items)}
         self.allow_veto = allow_veto
         self.request = request
         self.labels: dict[str, str] = {}
         self.new_entities: list[str] = []
+
+    @staticmethod
+    def _not_protected(entity_type: Any, category: Any) -> str:
+        """An operation for a category the user doesn't protect: accepted, nothing changes. Not an error, so a
+        model that ignores the policy can't push the request into a failed correction round."""
+        found = category if isinstance(category, str) and category in BY_ID else category_of(entity_type)
+        return f"left as is: {BY_ID[found].label} are not protected in this profile"
 
     def item(self, ref: Any, *, tool_result: bool = False, what: str = "") -> ContextItem:
         item = self.refs.get(ref) if isinstance(ref, str) else None
@@ -412,6 +422,8 @@ class Applier:
 
     # --- mask ---
     def mask(self, op: dict[str, Any]) -> str:
+        if not op.get("token") and not op.get("alias") and not protected(self.protect, op.get("type"), op.get("category")):
+            return self._not_protected(op.get("type"), op.get("category"))
         item = self.item(op.get("item"))
         start, end = _inside_json_string(item, *self._locate(item, op))
         text = item.original[start:end]
@@ -503,6 +515,8 @@ class Applier:
 
     # --- hide (rephrase: a whole-line range of a tool result) ---
     def hide(self, op: dict[str, Any]) -> str:
+        if not protected(self.protect, op.get("type"), op.get("category")):
+            return self._not_protected(op.get("type"), op.get("category"))
         item = self.item(op.get("item"), tool_result=True, what="hide")
         lines = item.original.split("\n")
         start, end = op.get("start"), op.get("end")
@@ -526,6 +540,8 @@ class Applier:
 
     # --- replace (rephrase: one occurrence of a tool result) ---
     def replace(self, op: dict[str, Any]) -> str:
+        if not protected(self.protect, op.get("type"), op.get("category")):
+            return self._not_protected(op.get("type"), op.get("category"))
         item = self.item(op.get("item"), tool_result=True, what="replace")
         start, end = self._locate(item, op)
         replacement = self._check_rephrase(op.get("with"), "with")

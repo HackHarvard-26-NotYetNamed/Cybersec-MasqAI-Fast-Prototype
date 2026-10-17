@@ -31,6 +31,7 @@ from .config import (ALWAYS_DROPPED_HEADERS, DEFAULT_HEADER_ALLOWLIST, DEFAULT_H
 from .detectors import host_values, rule_names
 from .hygiene import pseudonymize, stripped_headers
 from .model import Session
+from .policy import CATEGORIES
 from .observer import ResponseObserver
 from .replay import ResponseRecorder, export, record_request
 from .restore import extract_inbound_tool_calls, reject_inbound_tool_call, rejection_message, restore_map, restore_response
@@ -234,6 +235,7 @@ def create_app(config: GatewayConfig, *, admin_token: str | None = None, playgro
             "detector_rules": rule_names(config.detectors.rules_dir),
             "host_identifiers": [{"type": t, "value": v} for t, v in host_values()],
             "default_security_prompt": Sanitizer._default_prompt(),
+            "protect_categories": [{"id": c.id, "label": c.label, "kind": c.kind, "description": c.description} for c in CATEGORIES],
             "env_names": sorted(env_names),
             "listen": f"http://{config.host}:{config.port}",
             "playground": playground,
