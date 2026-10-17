@@ -58,7 +58,9 @@ See [`masqai.json.example`](masqai.json.example). Unknown keys are rejected at l
 - **routes / default_route**: model alias → provider and upstream model.
 - **pass_unknown** (default `false`): forward content MasqAI can't inspect raw, with a warning, instead of 422.
 - **security**: `provider`, `model`, `api_format` (`openai`/`anthropic`), `allow_remote_security_model` (default
-  `false`: only `127.0.0.0/8`, `::1` or `localhost`, no DNS lookup), `timeout_s`, `context_mode` (`recent`/`full`),
+  `false`: only `127.0.0.0/8`, `::1` or `localhost`, no DNS lookup), `timeout_s`, `context_tokens` (the security
+  model's context window; a reply that fills it is not trusted and the request fails closed, because the server may
+  have truncated or shifted away the instructions. Ollama's default is 4096; `0` = no check), `context_mode` (`recent`/`full`),
   `recent_items`, `nearest_ops`, `op_context_lines`, `auto_mask` (`auto` or `auto_veto`, the default: the model may veto
   a wrong automatic mask), `tool_rejection` (`rewrite`, the default: a rejected tool call runs a harmless `echo` of the
   rejection instead; `error`: HTTP 400 `masqai_tool_rejected`), and `system_prompt` (empty = the built-in [`masqai/prompts/security.md`](masqai/prompts/security.md);

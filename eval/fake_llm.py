@@ -17,6 +17,7 @@ import threading
 
 import uvicorn
 from fastapi import FastAPI, Request
+from fastapi.responses import StreamingResponse
 
 agent = FastAPI(title="fake agent model")
 security = FastAPI(title="fake security model")
@@ -98,14 +99,35 @@ def script(task: str, step: int, out: str) -> tuple[str | None, str | None]:
     return "I don't know this task.", None
 
 
+def stream(answer: dict):
+    """The same answer as SSE, arguments in 5-character deltas (placeholders split across frames)."""
+    message, base = answer["choices"][0]["message"], {k: answer[k] for k in ("id", "object", "model")}
+
+    def frame(delta: dict, finish: str | None = None) -> bytes:
+        return ("data: " + json.dumps({**base, "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}) + "\n\n").encode()
+
+    yield frame({"role": "assistant", "content": message["content"]} if message["content"] else {"role": "assistant"})
+    for i, call in enumerate(message.get("tool_calls") or []):
+        yield frame({"tool_calls": [{"index": i, "id": call["id"], "type": "function", "function": {"name": "bash", "arguments": ""}}]})
+        args = call["function"]["arguments"]
+        for n in range(0, len(args), 5):
+            yield frame({"tool_calls": [{"index": i, "function": {"arguments": args[n:n + 5]}}]})
+    yield frame({}, answer["choices"][0]["finish_reason"])
+    yield ("data: " + json.dumps({**base, "choices": [], "usage": answer["usage"]}) + "\n\n").encode()
+    yield b"data: [DONE]\n\n"
+
+
 @agent.post("/v1/chat/completions")
-async def agent_chat(request: Request) -> dict:
+async def agent_chat(request: Request):
     body = await request.json()
     messages = body["messages"]
     task = next(m["content"] for m in messages if m["role"] == "user")
     step = sum(1 for m in messages if m["role"] == "tool")
     text, command = script(task, step, last_output(messages) if step else "")
-    return reply(text, command, len(json.dumps(body)))
+    answer = reply(text, command, len(json.dumps(body)))
+    if body.get("stream"):
+        return StreamingResponse(stream(answer), media_type="text/event-stream")
+    return answer
 
 
 # A deterministic stand-in for the local security model: masks names, handles and key fingerprints,
@@ -121,6 +143,11 @@ CONFIG_PATH = re.compile(r"path = '(/[^']+)'")   # a configured path to private 
 async def security_chat(request: Request) -> dict:
     body = await request.json()
     data = json.loads(body["messages"][-1]["content"])
+    if data.get("task") == "inbound_tool_inspection":
+        # The inbound tool guardrail: block only a command that sends something off the machine.
+        outbound = re.search(r"\b(curl|wget|scp|nc|ssh)\b|https?://", json.dumps(data.get("arguments")))
+        decision = {"decision": "block", "reason": "sends a secret off the machine"} if outbound else {"decision": "allow"}
+        return {"choices": [{"message": {"role": "assistant", "content": json.dumps(decision)}}]}
     if "new_items" not in data:          # a correction round: nothing to fix
         return {"choices": [{"message": {"role": "assistant", "content": json.dumps({"operations": []})}}]}
     ops: list[dict] = []

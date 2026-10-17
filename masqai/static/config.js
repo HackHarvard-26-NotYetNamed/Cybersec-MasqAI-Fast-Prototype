@@ -274,6 +274,8 @@ const ConfigPanel = (() => {
         ]), "The API the security call uses, independent of what your agent uses. It decides both the endpoint and how the provider's key is attached. Most local servers only offer the OpenAI format."),
         field("Timeout (seconds)", "security.timeout_s", input(s, "timeout_s", { type: "number", min: 1, step: 1 }),
           "Maximum wait for one security call. Exceeding it blocks the request (fail closed). Local models on CPU can need 30 to 120 seconds for long contexts."),
+        field("Context window (tokens)", "security.context_tokens", input(s, "context_tokens", { type: "number", min: 0, step: 1 }),
+          "The security model's context size (Ollama's default is 4096). A reply that fills it may have lost its instructions to truncation, so the request is blocked (fail closed). ", c("0"), " turns the check off."),
         field("Context mode", "security.context_mode", radios(s, "context_mode", [
           { value: "recent", label: "Recent", desc: "use the three limits below; fast, fits small models" },
           { value: "full", label: "Full", desc: "the same input with every limit removed: all earlier operations, whole items around them, all tool context; most thorough, slowest, can exceed a small model's context window and then fail closed" },

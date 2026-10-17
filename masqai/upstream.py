@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
@@ -55,24 +54,12 @@ def headers_for(provider: ProviderConfig, incoming: dict[str, str], policy: Head
     return result
 
 
-async def request(provider: ProviderConfig, path: str, body: dict[str, Any], incoming: dict[str, str], timeout: float, policy: HeaderPolicy | None = None) -> httpx.Response:
+async def request(provider: ProviderConfig, path: str, body: dict[str, Any], incoming: dict[str, str], timeout: float,
+                  policy: HeaderPolicy | None = None, params: Any = None) -> httpx.Response:
     async with httpx.AsyncClient(timeout=timeout) as client:
-        async with client.stream("POST", endpoint_url(provider.base_url, path), json=body, headers=headers_for(provider, incoming, policy)) as response:
+        async with client.stream("POST", endpoint_url(provider.base_url, path), params=params, json=body,
+                                 headers=headers_for(provider, incoming, policy)) as response:
             content = await read_limited(response)
         # A detached copy: same status, headers and body, already read and decoded.
         headers = [(k, v) for k, v in response.headers.multi_items() if k.lower() not in {"content-encoding", "content-length", "transfer-encoding"}]
         return httpx.Response(response.status_code, headers=headers, content=content, request=response.request)
-
-
-async def stream_request(provider: ProviderConfig, path: str, body: dict[str, Any], incoming: dict[str, str], timeout: float, policy: HeaderPolicy | None = None) -> AsyncIterator[bytes]:
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        async with client.stream("POST", endpoint_url(provider.base_url, path), json=body, headers=headers_for(provider, incoming, policy)) as response:
-            response.raise_for_status()
-            async for chunk in response.aiter_bytes():
-                yield chunk
-
-
-def model_path(api: str, requested: str) -> str:
-    if api == "anthropic":
-        return "/v1/messages"
-    return "/v1/responses" if requested == "responses" else "/v1/chat/completions"

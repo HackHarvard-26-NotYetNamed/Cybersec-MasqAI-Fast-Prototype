@@ -137,6 +137,10 @@ class SecurityModelConfig(BaseModel):
     # literally loopback is refused (before anything is sent) unless this is true.
     allow_remote_security_model: bool = False
     timeout_s: float = Field(60.0, gt=0)
+    # The security model's context window in tokens (Ollama defaults to 4096). When a reply's
+    # prompt + completion tokens reach it, the server may have truncated or shifted the context,
+    # dropping the instructions, so the answer is not trusted: the request fails closed. 0 = unknown, no check.
+    context_tokens: int = Field(0, ge=0)
     context_mode: Literal["recent", "full"] = "recent"
     recent_items: int = Field(12, ge=0)
     nearest_ops: int = Field(-1, ge=-1)          # -1 = all existing operations

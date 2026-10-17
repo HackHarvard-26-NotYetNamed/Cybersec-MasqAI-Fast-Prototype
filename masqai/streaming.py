@@ -37,7 +37,6 @@ class SSETransformer:
         self.streams: dict[tuple, ArgumentStream] = {}
         self.anthropic_types: dict[int, str] = {}      # content block index -> block type
         self.responses_types: dict[str, str] = {}      # item id -> item type
-        self.chat_template: dict[str, Any] = {}
         # Guardrail: frames held back since the first tool call, and each call's raw (placeholder) arguments.
         self.holding = False
         self.held: list[bytes] = []

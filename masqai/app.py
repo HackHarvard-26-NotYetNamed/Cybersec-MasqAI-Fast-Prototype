@@ -451,7 +451,8 @@ def create_app(config: GatewayConfig, *, admin_token: str | None = None, playgro
                 streaming = True
                 return StreamingResponse(chained(), status_code=upstream.status_code, headers=response_headers(upstream.headers))
 
-            response = await upstream_request(provider, path, sanitized, dict(request.headers), config.upstream_timeout_seconds, config.headers)
+            response = await upstream_request(provider, path, sanitized, dict(request.headers), config.upstream_timeout_seconds, config.headers,
+                                              params=request.query_params)
             if response.status_code >= 400:
                 logs.log.error("upstream HTTP %d: %s", response.status_code, masked(logs.error_text(response.content)))
                 return Response(response.content, status_code=response.status_code, headers=response_headers(response.headers))

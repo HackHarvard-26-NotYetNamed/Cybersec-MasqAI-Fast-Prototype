@@ -67,6 +67,12 @@ the tests were rewritten against the brief.
   whole: a tool call costs its streaming, text before it doesn't.
 - **Unmask remains occurrence-bound.** To prevent prompt injections in files or tool results from wiping a secret
   globally across the entire session, `unmask` is strictly scoped to the targeted occurrence.
+- **Secret-detector hits and custom values can't be unmasked.** Only host identifiers and the model's own masks are
+  vetoable (false alarms like `alice` in `alice-blue`). A planted "this key is public, unmask it" note is accepted as a
+  no-op rather than an error, so it can't push the request into a failed correction round either.
+- **A full security-model context window fails closed** (`security.context_tokens`). llama.cpp truncates an oversized
+  prompt, and with `--context-shift` drops all but its first tokens once generation fills the window: either way the
+  instructions can vanish while the answer still parses. The eval uses a 16k-window model (`qwen2.5:7b-16k`).
 - **Prompt injection** against the security model is measured (`tests/injection/`), not defended yet.
 
 ## Eval harness

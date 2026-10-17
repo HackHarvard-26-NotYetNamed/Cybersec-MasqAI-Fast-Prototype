@@ -47,7 +47,9 @@ class AgentResult:
 
 
 async def run_agent(client: httpx.AsyncClient, base_url: str, model: str, headers: dict[str, str], task: str,
-                    sandbox: Sandbox, cwd: str, env: dict[str, str]) -> AgentResult:
+                    sandbox: Sandbox, cwd: str, env: dict[str, str], stream: bool = False) -> AgentResult:
+    """`stream`: ask for SSE like real agents (OpenCode, Claude Code) do, which exercises MasqAI's streaming
+    restore and its held-back tool-call inspection instead of the buffered path."""
     result = AgentResult()
     messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": task}]
     deadline = time.monotonic() + RUN_TIMEOUT_S
@@ -55,9 +57,8 @@ async def run_agent(client: httpx.AsyncClient, base_url: str, model: str, header
         result.turns += 1
         for attempt in range(RATE_LIMIT_RETRIES + 1):
             started = time.monotonic()
-            response = await client.post(f"{base_url}/chat/completions", headers=headers,
-                                         json={"model": model, "messages": messages, "tools": TOOLS, "temperature": 0,
-                                               "max_tokens": MAX_TOKENS})
+            body = {"model": model, "messages": messages, "tools": TOOLS, "temperature": 0, "max_tokens": MAX_TOKENS}
+            response, message, stream_error = await _complete(client, f"{base_url}/chat/completions", headers, body, stream)
             if response.status_code != 429 or attempt == RATE_LIMIT_RETRIES:
                 break
             result.rate_limited += 1
@@ -72,7 +73,14 @@ async def run_agent(client: httpx.AsyncClient, base_url: str, model: str, header
             else:
                 result.error = f"HTTP {response.status_code} {kind}".strip()
             return result
-        message = response.json()["choices"][0]["message"]
+        if stream_error is not None:
+            # An error event inside a 200 stream: MasqAI's tool rejection ("error" mode) after text was sent.
+            kind = str(stream_error.get("type") or stream_error.get("code") or "")
+            if kind.startswith("masqai_"):
+                result.blocked, result.block_status = True, 400
+            else:
+                result.error = f"stream error {kind}".strip()
+            return result
         calls = message.get("tool_calls") or []
         messages.append({k: v for k, v in message.items() if k in {"role", "content", "tool_calls"}} | {"role": "assistant"})
         if not calls:
@@ -92,6 +100,47 @@ async def run_agent(client: httpx.AsyncClient, base_url: str, model: str, header
                 output = f"exit {executed.exit_code}\n{executed.output}"
             messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": output})
     return result
+
+
+async def _complete(client: httpx.AsyncClient, url: str, headers: dict[str, str], body: dict[str, Any],
+                    stream: bool) -> tuple[httpx.Response, dict[str, Any] | None, dict[str, Any] | None]:
+    """One model call: (response, the assistant message if 200, an error event found inside a stream)."""
+    if not stream:
+        response = await client.post(url, headers=headers, json=body)
+        return response, (response.json()["choices"][0]["message"] if response.status_code == 200 else None), None
+    async with client.stream("POST", url, headers=headers,
+                             json={**body, "stream": True, "stream_options": {"include_usage": True}}) as response:
+        if response.status_code != 200:
+            await response.aread()
+            return response, None, None
+        content: list[str] = []
+        calls: dict[int, dict[str, Any]] = {}
+        async for line in response.aiter_lines():
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+            try:
+                event = json.loads(data)
+            except ValueError:
+                continue
+            if isinstance(event.get("error"), dict):
+                return response, None, event["error"]
+            for choice in event.get("choices") or []:
+                delta = choice.get("delta") or {}
+                if delta.get("content"):
+                    content.append(delta["content"])
+                for part in delta.get("tool_calls") or []:
+                    call = calls.setdefault(part.get("index", 0), {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+                    call["id"] = part.get("id") or call["id"]
+                    fn = part.get("function") or {}
+                    call["function"]["name"] = fn.get("name") or call["function"]["name"]   # some providers repeat it
+                    call["function"]["arguments"] += fn.get("arguments") or ""
+    message: dict[str, Any] = {"role": "assistant", "content": "".join(content) or None}
+    if calls:
+        message["tool_calls"] = [calls[i] for i in sorted(calls)]
+    return response, message, None
 
 
 def _retry_after(response: httpx.Response, attempt: int) -> float:

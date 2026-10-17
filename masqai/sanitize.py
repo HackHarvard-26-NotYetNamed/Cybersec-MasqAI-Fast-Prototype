@@ -172,12 +172,18 @@ class Sanitizer:
                 new_autos = [s for s in item.spans if s["origin"] == "auto" and (s["start"], s["end"]) not in old_auto_spans]
                 if new_autos:
                     text = item.original
+                    starts = line_starts(text)
+                    first = min(line_of(starts, s["start"]) for s in new_autos)
+                    last = max(line_of(starts, max(s["start"], s["end"] - 1)) for s in new_autos)
+                    # Only the lines around the new masks, like existing_operations: the whole item could
+                    # be any size and would crowd the instructions out of a small context window.
+                    lo, hi = (1, len(starts)) if k is None else (max(1, first - k), min(len(starts), last + k))
                     retroactive_auto_masks.append({
                         "item": ref[item.id],
                         "role": item.role,
                         "kind": item.kind,
                         "auto_masks_applied": [{**address(text, s["start"], s["end"]), "placeholder": s["placeholder"]} for s in new_autos],
-                        "context": numbered(text)
+                        "context": numbered(text, lo, hi)
                     })
 
         # Existing security-model operations in older items of this request, nearest to the new items first.
@@ -282,6 +288,8 @@ class Sanitizer:
                 logs.log.warning("inbound security inspection returned HTTP %d (fail closed)", res.status_code)
                 return False, f"security model inspection error (HTTP {res.status_code})"
             data = res.json()
+            if self._context_full(data):
+                return False, "security model context window was filled (fail closed)"
             raw = self._security_content(data, security.api_format)
             parsed = json.loads(raw)
             if parsed.get("decision") == "block":
@@ -293,6 +301,17 @@ class Sanitizer:
         except Exception as exc:
             logs.log.warning("inbound security inspection error (%s) (fail closed)", exc)
             return False, f"inbound security inspection timed out or failed ({exc.__class__.__name__})"
+
+    def _context_full(self, data: Any) -> bool:
+        """Whether the reply used the whole context window: then the server truncated the prompt or shifted
+        the context (llama.cpp's --context-shift drops all but the first tokens), losing the instructions."""
+        window = self.config.security.context_tokens
+        usage = data.get("usage") if isinstance(data, dict) else None
+        if not window or not isinstance(usage, dict):
+            return False
+        prompt = usage.get("prompt_tokens", usage.get("input_tokens")) or 0
+        completion = usage.get("completion_tokens", usage.get("output_tokens")) or 0
+        return prompt + completion >= window - 16
 
     @staticmethod
     def _placeholder(session: Session, op: MaskOp) -> str:
@@ -363,6 +382,10 @@ class Sanitizer:
             data = response.json()
             content = self._security_content(data, security.api_format)
             self._attempt(trace, attempt, raw_output=content, usage=data.get("usage") if isinstance(data, dict) else None)
+            if self._context_full(data):
+                logs.log.error("security model context window full (%s tokens); its answer is not trusted", security.context_tokens)
+                raise SanitizationError(f"security model context window ({security.context_tokens} tokens) was filled: its instructions "
+                                        "may have been truncated, so its answer is not trusted")
             logs.log.info("security model answered in %.0f ms", elapsed)
             return content
         except SanitizationError:

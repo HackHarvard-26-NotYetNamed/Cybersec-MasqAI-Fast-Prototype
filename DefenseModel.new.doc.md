@@ -91,6 +91,7 @@ All modifications by the security model are strictly occurrence-bound (targeting
 5. **`unmask` (Occurrence-Bound Veto):**
    * Allows the security model to veto a deterministic or auto-applied mask if it was determined to be a false positive (when `auto_mask == "auto_veto"`).
    * Strictly occurrence-bound `(item_id, start, end)` to prevent prompt-injection attacks (e.g. planted notes in files or tool results) from wiping secrets session-wide.
+   * Only host identifiers and the model's own masks can be vetoed. Secret-detector hits (keys, tokens, emails) and custom values stay masked: such an unmask is accepted as a no-op.
 
 *Constraint:* `hide` and `replace` are permitted **only on `tool_result` items**. User instructions, system prompts, past assistant messages, and tool-call signatures are mask-only to preserve conversational integrity.
 

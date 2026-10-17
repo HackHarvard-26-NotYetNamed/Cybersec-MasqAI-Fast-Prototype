@@ -90,10 +90,9 @@ class GuardrailAttacks(unittest.TestCase):
             config_read = next(m for m in sent["messages"] if m.get("tool_call_id") == "c1")
             self.assertNotIn(KEY, config_read["content"])
 
-    @unittest.expectedFailure
     def test_injected_note_cannot_unmask_a_detected_key_at_all(self):
-        """Even occurrence-bound, the unmask sends the key once, inside the note. Detector-found secrets
-        (keys, tokens) could be made non-vetoable; vetoes would stay for host identifiers and the like."""
+        """Secret-detector hits (keys, tokens) can't be unmasked; vetoes remain for host identifiers and
+        the model's own masks."""
         with gateway(make_config(security=True)) as (app, client, fakes):
             self.assertNotIn(KEY, json.dumps(self.injected_unmask(client, fakes, global_flag=False)))
 

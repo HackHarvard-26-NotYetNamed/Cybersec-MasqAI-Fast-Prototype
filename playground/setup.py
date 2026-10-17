@@ -197,7 +197,7 @@ def masq_config(model: str, security: str, security_model: str | None) -> dict:
     providers = [{"name": "relay", "base_url": "http://127.0.0.1:8788", "format": "openai", "headers": {}}]
     if security == "ollama":
         providers.append({"name": "ollama-local", "base_url": "http://127.0.0.1:11434", "format": "openai", "headers": {}})
-        sec = {"provider": "ollama-local", "model": security_model or "qwen2.5:7b", "timeout_s": 180,
+        sec = {"provider": "ollama-local", "model": security_model or "qwen2.5:7b", "timeout_s": 180, "context_tokens": 4096,
                "allow_remote_security_model": False}
     else:
         # A *different* provider than the agent's upstream. It still sees raw context: see README.

@@ -40,7 +40,7 @@ async def relay_records(http: httpx.AsyncClient, run_id: str) -> list[dict[str, 
     return response.json()["requests"]
 
 
-async def one_run(case: Case, condition: str, backend, http: httpx.AsyncClient) -> dict[str, Any]:
+async def one_run(case: Case, condition: str, backend, http: httpx.AsyncClient, stream: bool = False) -> dict[str, Any]:
     run_id = f"{case.id}.{condition}.{secrets.token_hex(4)}"
     row: dict[str, Any] = {"run_id": run_id, "case": case.id, "condition": condition, "task_ok": False, "leaked": [],
                            "leaked_count": 0, "canary_count": 0, "relay_requests": 0, "blocked": False, "block_status": None,
@@ -67,7 +67,7 @@ async def one_run(case: Case, condition: str, backend, http: httpx.AsyncClient) 
                    "authorization": "Bearer relay-direct" if condition == "raw" else "Bearer masqai-eval"}
         started = time.monotonic()
         result = await run_agent(http, BASE[condition], f"eval/{run_id}", headers, render(case.task(), values, root),
-                                 sandbox, workdir, env)
+                                 sandbox, workdir, env, stream)
         row["wall_ms"] = round((time.monotonic() - started) * 1000)
         row["turns"] = result.turns
         row["blocked"], row["block_status"] = result.blocked, result.block_status
@@ -133,7 +133,8 @@ async def main_async(args: argparse.Namespace) -> int:
     (OUT / "meta.json").write_text(json.dumps({
         "startedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "runsPerCase": args.runs, "securityModel": args.security_model, "untrustedModel": args.untrusted_model,
-        "agent": "MasqAI eval agent (Chat Completions + bash tool)", "sandbox": backend.name,
+        "agent": "MasqAI eval agent (Chat Completions + bash tool" + (", streaming)" if args.stream else ")"), "sandbox": backend.name,
+        "stream": bool(args.stream),
         "selfTest": bool(args.self_test),
     }, indent=2), encoding="utf-8")
     semaphore = asyncio.Semaphore(args.concurrency)
@@ -144,7 +145,7 @@ async def main_async(args: argparse.Namespace) -> int:
         async def guarded(case: Case, condition: str) -> None:
             nonlocal done, failed
             async with semaphore:
-                row = await one_run(case, condition, backend, http)
+                row = await one_run(case, condition, backend, http, args.stream)
             with (OUT / "runs.jsonl").open("a", encoding="utf-8") as out:
                 out.write(json.dumps(row) + "\n")
             done += 1
@@ -181,6 +182,7 @@ def main() -> None:
     parser.add_argument("--security-model", default=os.getenv("EVAL_SECURITY_MODEL", "qwen2.5:7b (local)"))
     parser.add_argument("--sandbox", choices=["daytona", "local"], default="daytona")
     parser.add_argument("--self-test", action="store_true", help="with --sandbox local: commands come from eval/fake_llm.py only")
+    parser.add_argument("--stream", action="store_true", help="the agent streams (SSE), like OpenCode or Claude Code")
     parser.add_argument("--injection", action="store_true", help="run tests/injection through the security model instead")
     parser.add_argument("--masqai-config", default=str(Path(__file__).parent / "masqai.eval.json"))
     args = parser.parse_args()

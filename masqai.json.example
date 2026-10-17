@@ -23,7 +23,8 @@
     "op_context_lines": 2,
     "auto_mask": "auto_veto",
     "tool_rejection": "rewrite",
-    "timeout_s": 60
+    "timeout_s": 60,
+    "context_tokens": 4096
   },
   "detectors": {"detect_host_identifiers": true, "custom_values": [], "rules_dir": "masqai/rules"},
   "headers": {"mode": "blocklist", "user_agent": "masqai/0.2.0"},

@@ -94,6 +94,8 @@ for keys only, any 12-character or longer piece of its random part.
 ```bash
 pip install -r requirements.txt -r eval/requirements.txt
 ollama pull qwen2.5:7b                       # the security model (local)
+# Ollama's default 4096-token window is too small: a full window drops the instructions (--context-shift).
+printf 'FROM qwen2.5:7b\nPARAMETER num_ctx 16384\n' > Modelfile && ollama create qwen2.5:7b-16k -f Modelfile
 
 # terminal 1: the untrusted endpoint
 export OPENROUTER_API_KEY=sk-or-v1-...       # only the relay holds the upstream key
@@ -105,13 +107,15 @@ python run_gateway.py --config eval/masqai.eval.json
 # terminal 3: the harness
 export DAYTONA_API_KEY=...
 python -m eval.smoke                                                  # < 3 min, pass/fail
+python -m eval.smoke --stream                                         # the same, streaming like real agents
 python -m eval.run_eval --cases all --conditions raw,masqai --runs 10 --concurrency 8 \
        --untrusted-model google/gemini-3.8-flash
 python -m eval.run_eval --injection --runs 20                         # optional: tests/injection
 python -m eval.aggregate eval/out/runs.jsonl > web/public/data/results.json
 ```
 
-`--untrusted-model` must name what the relay forwards to (`--eval-model`); it's recorded in
+`--stream` makes the agent stream (SSE) like OpenCode and Claude Code, which exercises MasqAI's streaming
+restore and its held-back tool-call inspection; it is recorded in meta.json. `--untrusted-model` must name what the relay forwards to (`--eval-model`); it's recorded in
 `results.json`. Agent caps: 12 turns, 120 s per command, 15 min per run. Final numbers use `--runs 20`.
 
 ## Outputs (`eval/out/`, git-ignored)

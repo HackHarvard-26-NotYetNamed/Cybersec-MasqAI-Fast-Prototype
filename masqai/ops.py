@@ -25,6 +25,9 @@ MAX_SUMMARY = 200          # hide summaries and replace substitutes
 MAX_REASON = 300
 CLASSES = ("secret", "intel")
 TYPE_RE = re.compile(r"[A-Z][A-Z0-9_]*")
+# Automatic masks the security model may veto: host identifiers (a username that is also an ordinary
+# word) and values the model itself masked earlier. Secret-detector hits and custom values are final.
+VETOABLE_ORIGINS = {"detector:host", "model"}
 PLACEHOLDER_RE = re.compile(r"<\$?[A-Z][A-Z0-9_]*_[a-f0-9]{8}>")
 
 
@@ -565,12 +568,19 @@ class Applier:
         item = self.item(op.get("item"))
         start, end = self._locate(item, op)
         autos, _ = auto_spans(self.session, item.id, item.original)
-        if not any(s.start == start and s.end == end for s in autos):
+        span = next((s for s in autos if s.start == start and s.end == end), None)
+        if span is None:
             raise OpError("unmask only applies to an automatic copy of a known value at exactly this position")
         # Kept strictly occurrence-bound: unmask applies only to this exact location to prevent
         # prompt injections in files or tool results from wiping a secret globally across the session.
         if "global" in op:
             raise OpError("unmask does not support global; unmask is strictly occurrence-bound")
+        origin = self.session.root(span.token).origin
+        if origin.startswith("detector:") and origin not in VETOABLE_ORIGINS:
+            # A secret-detector hit (key, token, email) or a value the user listed: a planted "this is not a
+            # secret" note must not get it sent. Accepted as a no-op rather than an error, so an injection
+            # can't push the request into a failed correction round either.
+            return "kept masked: values found by a secret detector or listed by the user can't be unmasked"
         self.session.vetoes.setdefault(item.id, set()).add((start, end))
         self.session.veto_reasons[(item.id, start, end)] = _reason(op)
         return "automatic mask removed at this occurrence"
