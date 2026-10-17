@@ -115,16 +115,6 @@ class AutoMasksAndVeto(unittest.TestCase):
         [r] = apply(session, items, {"op": "unmask", "item": "#1", "line": 1, "text": "alice"}, veto=False)
         self.assertFalse(r["ok"])
 
-    def test_unmask_global_revokes_entity(self):
-        session = Session("s")
-        session.new_entity("alice", "USERNAME")
-        items = tool_items("alice and alice")
-        [r] = apply(session, items, {"op": "unmask", "item": "#1", "line": 1, "text": "alice", "global": True, "reason": "false alarm"})
-        self.assertTrue(r["ok"])
-        self.assertEqual(len(session.entities), 0)
-        plan_all(session, items)
-        self.assertEqual(items[0].sanitized, "alice and alice")
-
     def test_url_encoded_auto_mask(self):
         session = Session("s")
         session.new_entity("C:/Users/alice/data", "PATH")

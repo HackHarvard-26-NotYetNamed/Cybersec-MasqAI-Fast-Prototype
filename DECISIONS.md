@@ -54,9 +54,12 @@ the tests were rewritten against the brief.
 
 ## Accepted risks (documented, not narrowed)
 
-- **Inbound restore guardrail implemented.** Rather than naively restoring placeholders across all tool calls,
-  MasqAI performs an inline security inspection for tool calls containing placeholders. Calls that attempt
-  to exfiltrate secrets over the network are intercepted and replaced with an assistant warning block.
+- **Inbound restore guardrail implemented across complete and streamed traffic.** Rather than naively
+  restoring placeholders across all tool calls, MasqAI inspects tool calls containing placeholders. Calls that
+  attempt to exfiltrate secrets over network vectors are intercepted and replaced with an assistant warning block
+  (failing closed on errors), while local file/DB queries pass through unhindered.
+- **Unmask remains occurrence-bound.** To prevent prompt injections in files or tool results from wiping a secret
+  globally across the entire session, `unmask` is strictly scoped to the targeted occurrence.
 - **Prompt injection** against the security model is measured (`tests/injection/`), not defended yet.
 
 ## Eval harness

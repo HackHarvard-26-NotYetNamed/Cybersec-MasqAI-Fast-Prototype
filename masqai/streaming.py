@@ -101,12 +101,15 @@ class SSETransformer:
             delta = choice.get("delta") or {}
             for call in delta.get("tool_calls") or []:
                 fn = call.get("function") or {}
+                call_idx = call.get("index", 0)
+                if fn.get("name"):
+                    self.streams.setdefault(("tool_name", ci, call_idx), fn["name"])
                 if isinstance(fn.get("arguments"), str):
-                    fn["arguments"] = self.stream(("chat", ci, call.get("index", 0))).feed(fn["arguments"])
+                    fn["arguments"] = self.stream(("chat", ci, call_idx)).feed(fn["arguments"])
             if isinstance((delta.get("function_call") or {}).get("arguments"), str):
                 delta["function_call"]["arguments"] = self.stream(("chat-fc", ci)).feed(delta["function_call"]["arguments"])
             if choice.get("finish_reason"):
-                for key in [k for k in self.streams if k[0] in {"chat", "chat-fc"} and k[1] == ci]:
+                for key in [k for k in list(self.streams.keys()) if k[0] in {"chat", "chat-fc"} and k[1] == ci]:
                     rest = self.flush(key)
                     if not rest:
                         continue
@@ -136,6 +139,7 @@ class SSETransformer:
             if rest:
                 return [self.encode({"type": "content_block_delta", "index": index, "delta": {"type": "input_json_delta", "partial_json": rest}},
                                     "content_block_delta")]
+        return []
         return []
 
     # ---------- Responses ----------

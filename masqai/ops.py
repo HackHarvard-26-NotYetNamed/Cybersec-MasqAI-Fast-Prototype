@@ -526,25 +526,10 @@ class Applier:
         item = self.item(op.get("item"))
         start, end = self._locate(item, op)
         autos, _ = auto_spans(self.session, item.id, item.original)
-        matched_auto = next((s for s in autos if s.start == start and s.end == end), None)
-        if matched_auto is None:
+        if not any(s.start == start and s.end == end for s in autos):
             raise OpError("unmask only applies to an automatic copy of a known value at exactly this position")
-        
-        is_global = op.get("global", False)
-        if not isinstance(is_global, bool):
-            raise OpError("global must be a boolean (true or false)")
-            
-        if is_global:
-            # Revoke the entity globally from session.entities and remove any auto-spans of it
-            token = matched_auto.token
-            if token in self.session.entities:
-                del self.session.entities[token]
-            # Clear any other entities that merged into this token
-            for ent in self.session.entities.values():
-                if ent.merged_into == token:
-                    ent.merged_into = None
-            return f"entity {token} globally revoked and automatic masks removed"
-
+        # Kept strictly occurrence-bound: unmask applies only to this exact location to prevent
+        # prompt injections in files or tool results from wiping a secret globally across the session.
         self.session.vetoes.setdefault(item.id, set()).add((start, end))
         self.session.veto_reasons[(item.id, start, end)] = _reason(op)
         return "automatic mask removed at this occurrence"

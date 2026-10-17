@@ -464,6 +464,36 @@ class ReplayExport(unittest.TestCase):
             self.assertIn("[MasqAI] Blocked tool call `bash`", choice["message"]["content"])
             self.assertNotIn("tool_calls", choice["message"])
 
+    def test_inbound_tool_call_allows_local_db_read(self):
+        with gateway(make_config(security=True)) as (app, client, fakes):
+            session_id = "test-inbound-local"
+            fakes.upstream = lambda r: httpx.Response(200, json={
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [{
+                            "id": "tc2",
+                            "type": "function",
+                            "function": {
+                                "name": "sqlite3",
+                                "arguments": json.dumps({"db_path": "<PATH_1234abcd>", "query": "SELECT * FROM users"})
+                            }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }]
+            })
+            fakes.security_answers = [[]]
+            r = client.post("/v1/chat/completions", json=chat({"role": "user", "content": "check db"}),
+                            headers={"x-masqai-session": session_id})
+            self.assertEqual(r.status_code, 200)
+            data = r.json()
+            choice = data["choices"][0]
+            self.assertEqual(choice["finish_reason"], "tool_calls")
+            self.assertIn("tool_calls", choice["message"])
+
 
 if __name__ == "__main__":
     unittest.main()

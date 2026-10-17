@@ -39,8 +39,6 @@ Every operation points at EXACTLY ONE occurrence: `text` copied exactly from the
   Every occurrence of the first is then sent as <$KEY_bbbbbbbb>.
 - Veto one automatic mask that is wrong (only when auto_masks_applied is present):
   {"op":"unmask","item":"#4","line":3,"text":"...","nth":1,"reason":"a color name, not the username"}
-  Add "global": true to permanently revoke the entity across the entire session if it was a false alarm everywhere:
-  {"op":"unmask","item":"#4","line":3,"text":"...","nth":1,"global":true,"reason":"common word, not a secret"}
 
 ## Rules
 

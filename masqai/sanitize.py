@@ -231,14 +231,29 @@ class Sanitizer:
 
     async def inspect_inbound_tool_call(self, session: Session, tool_name: str, arguments: Any,
                                          placeholders: set[str], mapping: dict[str, str]) -> tuple[bool, str]:
-        """Ask the local security model if a tool execution containing placeholders is safe or an exfiltration attempt.
-        Returns (approved, reason)."""
+        """Inspect a tool execution containing placeholders for exfiltration.
+        Fails closed on error/timeout, but avoids false alarms on purely local file/DB operations."""
+        arg_str = json.dumps(arguments, ensure_ascii=False) if not isinstance(arguments, str) else arguments
+        
+        # High-precision network exfiltration heuristics:
+        # If the tool call has no network-like arguments (no URL schemes, IPs, or outbound CLI tools like curl/wget/fetch),
+        # allow purely local operations (e.g. read_file, sqlite3, local python script without urls).
+        network_indicator = any(x in arg_str.lower() for x in (
+            "http://", "https://", "ftp://", "ssh://", "ws://", "wss://",
+            "curl ", "wget ", "fetch(", "requests.", "urllib.", "http.client",
+            "nc ", "ncat ", "netcat ", "socat ", "nslookup ", "dig "
+        ))
+        if not network_indicator and tool_name.lower() not in ("fetch", "http_request", "curl", "webhook"):
+            return True, "local tool execution (no outbound network indicators)"
+
         security = self.config.security
         if not security.enabled or not security.provider or not security.model:
-            return True, "security model disabled"
+            # If the user disabled the security model, we fail closed if network indicators are present with secrets
+            return False, f"exfiltration check blocked: secret placeholder(s) {', '.join(placeholders)} present in network command"
+            
         provider = self.config.provider(security.provider)
         if not security.allow_remote_security_model and not is_loopback_url(provider.base_url):
-            return True, "security provider not local"
+            return False, "remote security provider refused for inbound check (fail closed)"
 
         query = {
             "task": "inbound_tool_inspection",
@@ -260,21 +275,23 @@ class Sanitizer:
             endpoint = endpoint_url(provider.base_url, "/v1/chat/completions")
 
         try:
-            async with httpx.AsyncClient(timeout=min(security.timeout_s, 15.0)) as client:
+            async with httpx.AsyncClient(timeout=security.timeout_s) as client:
                 res = await client.post(endpoint, json=body, headers=headers)
             if res.status_code >= 400:
-                logs.log.warning("inbound security inspection returned HTTP %d; defaulting to allow", res.status_code)
-                return True, "inspection failed"
+                logs.log.warning("inbound security inspection returned HTTP %d (fail closed)", res.status_code)
+                return False, f"security model inspection error (HTTP {res.status_code})"
             data = res.json()
             raw = self._security_content(data, security.api_format)
             parsed = json.loads(raw)
             if parsed.get("decision") == "block":
                 reason = parsed.get("reason", f"secret {', '.join(placeholders)} would be exposed externally")
                 return False, reason
-            return True, "approved"
+            if parsed.get("decision") == "allow":
+                return True, "approved by security model"
+            return False, "unrecognized security model decision (fail closed)"
         except Exception as exc:
-            logs.log.warning("inbound security inspection error (%s); defaulting to allow", exc)
-            return True, "inspection error"
+            logs.log.warning("inbound security inspection error (%s) (fail closed)", exc)
+            return False, f"inbound security inspection timed out or failed ({exc.__class__.__name__})"
 
     @staticmethod
     def _placeholder(session: Session, op: MaskOp) -> str:
