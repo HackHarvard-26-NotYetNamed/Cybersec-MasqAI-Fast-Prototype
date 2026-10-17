@@ -33,7 +33,7 @@ from .hygiene import pseudonymize, stripped_headers
 from .model import Session
 from .observer import ResponseObserver
 from .replay import ResponseRecorder, export, record_request
-from .restore import block_inbound_tool_call, extract_inbound_tool_calls, restore_map, restore_response
+from .restore import extract_inbound_tool_calls, reject_inbound_tool_call, rejection_message, restore_map, restore_response
 from .sanitize import SanitizationError, Sanitizer
 from .session import SessionStore
 from .streaming import SSETransformer
@@ -46,6 +46,10 @@ V1_CSP = "sandbox; default-src 'none'; frame-ancestors 'none'"
 # GET/HEAD /v1/models[/...] is the only unsanitized passthrough: it carries no context.
 PASSTHROUGH_GET = re.compile(r"models(/[^/]+)*")
 RETENTION_INTERVAL_S = 60
+class ToolRejected(Exception):
+    """error-mode tool rejection before any byte of a stream was sent: answered as HTTP 400."""
+
+
 BLOCK_STATUS = {"security_model_failed": 502, "invalid_correction": 502, "remote_security_model_refused": 502}
 
 
@@ -306,6 +310,17 @@ def create_app(config: GatewayConfig, *, admin_token: str | None = None, playgro
         def masked(text: str) -> str:
             return scrub(text, session.known_values())
 
+        async def inspect_calls(calls: list[dict[str, Any]]) -> dict[Any, tuple[str, str]]:
+            """The inbound tool calls the guardrail rejects: {index, or a stream's call key: (tool, reason)}."""
+            rejected: dict[Any, tuple[str, str]] = {}
+            for n, call in enumerate(calls):
+                allowed, reason = await sanitizer.inspect_inbound_tool_call(session, call["tool"], call["arguments"], call["placeholders"], table)
+                if not allowed:
+                    logs.log.warning("rejected inbound tool call %s (%s): %s", call["tool"], config.security.tool_rejection, reason)
+                    broadcast({"type": "warning", "session": session.id, "message": f"tool call {call['tool']} rejected: {reason}"})
+                    rejected[call.get("key", n)] = (call["tool"], reason)
+            return rejected
+
         try:
             for warning in warnings:
                 logs.log.warning("pass_unknown: forwarding %s (type %r) raw", warning["location"], warning["type"])
@@ -392,9 +407,22 @@ def create_app(config: GatewayConfig, *, admin_token: str | None = None, playgro
                                 raise ResponseTooLarge(f"upstream stream exceeds {MAX_RESPONSE_BYTES} bytes")
                             for frame in transformer.feed(chunk):
                                 yield frame
+                        # Tool calls were held back until the stream ended: inspect them whole, then release.
+                        rejected = await inspect_calls(transformer.pending_calls())
+                        if rejected and config.security.tool_rejection == "error":
+                            message = rejection_message(*next(iter(rejected.values())))
+                            if not transformer.emitted:
+                                raise ToolRejected(message)
+                            for frame in transformer.error_frames(message):
+                                yield frame
+                            return
+                        for frame in transformer.release(set(rejected)):
+                            yield frame
                         tail = transformer.finish()
                         if tail:
                             yield tail
+                    except ToolRejected:
+                        raise
                     except Exception as exc:
                         logs.log.error("stream aborted: %s", exc.__class__.__name__)
                         raise
@@ -404,8 +432,24 @@ def create_app(config: GatewayConfig, *, admin_token: str | None = None, playgro
                         await client.aclose()
                         release()
 
+                # Read the first frame before answering: a stream that would open with a rejected tool call
+                # (error mode) can still become a plain HTTP 400.
+                frames = output()
+                try:
+                    first = await frames.__anext__()
+                except StopAsyncIteration:
+                    first = b""
+                except ToolRejected as exc:
+                    return error(400, "masqai_tool_rejected", str(exc))
+
+                async def chained():
+                    if first:
+                        yield first
+                    async for frame in frames:
+                        yield frame
+
                 streaming = True
-                return StreamingResponse(output(), status_code=upstream.status_code, headers=response_headers(upstream.headers))
+                return StreamingResponse(chained(), status_code=upstream.status_code, headers=response_headers(upstream.headers))
 
             response = await upstream_request(provider, path, sanitized, dict(request.headers), config.upstream_timeout_seconds, config.headers)
             if response.status_code >= 400:
@@ -415,15 +459,14 @@ def create_app(config: GatewayConfig, *, admin_token: str | None = None, playgro
                 return Response(response.content, status_code=response.status_code, headers=response_headers(response.headers))
             data = response.json()
             if isinstance(data, dict):
-                # Inline Inbound Tool Guardrail: check tool calls for exfiltration before restoring
-                inbound_calls = extract_inbound_tool_calls(data)
-                for call in inbound_calls:
-                    allowed, reason = await sanitizer.inspect_inbound_tool_call(
-                        session, call["tool"], call["arguments"], call["placeholders"], table
-                    )
-                    if not allowed:
-                        logs.log.warning("blocked inbound tool call %s: %s", call["tool"], reason)
-                        data = block_inbound_tool_call(data, call, reason)
+                # Inbound tool guardrail: inspect tool calls that carry placeholders before restoring them.
+                calls = extract_inbound_tool_calls(data)
+                rejected = await inspect_calls(calls)
+                if rejected and config.security.tool_rejection == "error":
+                    finish_record()
+                    return error(400, "masqai_tool_rejected", rejection_message(*next(iter(rejected.values()))))
+                for n in rejected:
+                    data = reject_inbound_tool_call(data, calls[n])
 
                 recorder.body(data)
                 observer.event(data)

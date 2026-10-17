@@ -164,7 +164,8 @@ class GuardrailFalseAlarms(unittest.TestCase):
                 fakes.security_answers = [[], {"decision": "block", "reason": "a 7B false alarm"}]
                 r = client.post("/v1/chat/completions", headers=SESSION,
                                 json={"model": "m", "messages": read_config() + [{"role": "user", "content": "go"}]})
-                self.assertIn("tool_calls", r.json()["choices"][0]["message"])
+                [call] = r.json()["choices"][0]["message"]["tool_calls"]
+                self.assertNotIn("MasqAI", call["function"]["arguments"])
 
 
 if __name__ == "__main__":

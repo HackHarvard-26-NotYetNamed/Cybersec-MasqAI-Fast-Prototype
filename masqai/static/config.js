@@ -288,6 +288,10 @@ const ConfigPanel = (() => {
           { value: "auto", label: "Mask automatically", desc: "every exact copy of a known value is masked unless it sits inside a longer word (ANDY in HANDY stays)" },
           { value: "auto_veto", label: "Mask automatically, model may veto", desc: "the same, and the security model may keep one automatic copy as-is with an unmask operation (e.g. a project name that is also an ordinary word). A wrong veto leaks that copy; each one is shown on the Security page." },
         ]), "Partial or changed forms (", c("<$…>"), ") are never copied automatically: the model marks each occurrence."),
+        field("Rejected tool calls", "security.tool_rejection", radios(s, "tool_rejection", [
+          { value: "rewrite", label: "Rewrite and continue", desc: "the call is kept, but its arguments become a harmless echo of \"MasqAI: the user's security profile rejected this execution\". The untrusted model reads that as the tool result and the session goes on." },
+          { value: "error", label: "Reject with an error", desc: "the call is wiped and the agent gets HTTP 400 masqai_tool_rejected (or an error event that ends the stream, if text was already sent)." },
+        ]), "Applies to tool calls carrying placeholders that the security model judges to send a secret off the machine."),
         field("Instructions", "security.system_prompt", h("div", { class: "rows" },
           h("textarea", { id: "f" + ++uid, value: s.system_prompt, spellcheck: false, placeholder: "(blank: use the built-in instructions)", oninput: (e) => { s.system_prompt = e.target.value; edited(e.target); } }),
           h("div", { class: "row" },

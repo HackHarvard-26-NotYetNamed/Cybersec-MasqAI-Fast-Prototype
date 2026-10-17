@@ -60,7 +60,8 @@ See [`masqai.json.example`](masqai.json.example). Unknown keys are rejected at l
 - **security**: `provider`, `model`, `api_format` (`openai`/`anthropic`), `allow_remote_security_model` (default
   `false`: only `127.0.0.0/8`, `::1` or `localhost`, no DNS lookup), `timeout_s`, `context_mode` (`recent`/`full`),
   `recent_items`, `nearest_ops`, `op_context_lines`, `auto_mask` (`auto` or `auto_veto`, the default: the model may veto
-  a wrong automatic mask), and `system_prompt` (empty = the built-in [`masqai/prompts/security.md`](masqai/prompts/security.md);
+  a wrong automatic mask), `tool_rejection` (`rewrite`, the default: a rejected tool call runs a harmless `echo` of the
+  rejection instead; `error`: HTTP 400 `masqai_tool_rejected`), and `system_prompt` (empty = the built-in [`masqai/prompts/security.md`](masqai/prompts/security.md);
   a prompt written for the prototype's `collapse` op is rejected).
 - **detectors**: `detect_host_identifiers` (hostname, OS username, home paths), `custom_values` (names, handles, emails
   to always mask), `rules_dir` (rule tables, default [`masqai/rules`](masqai/rules)).

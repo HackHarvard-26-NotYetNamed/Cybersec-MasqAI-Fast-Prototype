@@ -56,8 +56,15 @@ the tests were rewritten against the brief.
 
 - **Inbound restore guardrail implemented across complete and streamed traffic.** Rather than naively
   restoring placeholders across all tool calls, MasqAI inspects tool calls containing placeholders. Calls that
-  attempt to exfiltrate secrets over network vectors are intercepted and replaced with an assistant warning block
-  (failing closed on errors), while local file/DB queries pass through unhindered.
+  attempt to exfiltrate secrets over network vectors are rejected (failing closed on errors), while local file/DB
+  queries pass through unhindered.
+- **Active tool rejection.** A rejected call is not silently dropped. `security.tool_rejection: "rewrite"` (default)
+  keeps the call but turns every string in its arguments into `echo "MasqAI: the user's security profile rejected this
+  execution"`: the agent runs that, the untrusted model reads the rejection as the tool result, and the session goes on.
+  The security model's reason is never put into the arguments, because it is shaped by untrusted text. `"error"` wipes
+  the call and answers HTTP 400 `masqai_tool_rejected`, or, when text was already streamed, ends the stream with an error
+  event. In a stream, everything from the first tool call on is held back until the upstream finishes, then inspected
+  whole: a tool call costs its streaming, text before it doesn't.
 - **Unmask remains occurrence-bound.** To prevent prompt injections in files or tool results from wiping a secret
   globally across the entire session, `unmask` is strictly scoped to the targeted occurrence.
 - **Prompt injection** against the security model is measured (`tests/injection/`), not defended yet.

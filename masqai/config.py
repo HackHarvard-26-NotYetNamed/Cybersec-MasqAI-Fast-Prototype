@@ -144,6 +144,11 @@ class SecurityModelConfig(BaseModel):
     # "auto": exact copies of known values are masked at word boundaries.
     # "auto_veto": the same, and the security model may undo one automatic copy with an `unmask` operation.
     auto_mask: Literal["auto", "auto_veto"] = "auto_veto"
+    # What happens to an inbound tool call the guardrail rejects. "rewrite": the call is kept, but its
+    # arguments become a harmless command that tells the untrusted model the user's security profile
+    # rejected it, so the session continues. "error": the call is wiped and the client gets HTTP 400
+    # (or, if text was already streamed, an error event that ends the stream).
+    tool_rejection: Literal["rewrite", "error"] = "rewrite"
     # Empty = the built-in prompt in masqai/prompts/security.md.
     system_prompt: str = ""
 

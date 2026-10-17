@@ -5,6 +5,7 @@ import unittest
 import httpx
 
 from masqai.config import ModelRoute
+from masqai.restore import REJECTED_COMMAND
 from tests.helpers import UPSTREAM, api, gateway, make_config, sse, sse_payloads
 
 EMAIL = "alice@example.invalid.com"
@@ -458,11 +459,9 @@ class ReplayExport(unittest.TestCase):
             r = client.post("/v1/chat/completions", json=chat({"role": "user", "content": "run command"}),
                             headers={"x-masqai-session": session_id})
             self.assertEqual(r.status_code, 200)
-            data = r.json()
-            choice = data["choices"][0]
-            self.assertEqual(choice["finish_reason"], "stop")
-            self.assertIn("[MasqAI] Blocked tool call `bash`", choice["message"]["content"])
-            self.assertNotIn("tool_calls", choice["message"])
+            # Default tool_rejection "rewrite": the call stays, its arguments become the rejection command.
+            [call] = r.json()["choices"][0]["message"]["tool_calls"]
+            self.assertEqual(json.loads(call["function"]["arguments"]), {"cmd": REJECTED_COMMAND})
 
     def test_inbound_tool_call_allows_local_db_read(self):
         with gateway(make_config(security=True)) as (app, client, fakes):

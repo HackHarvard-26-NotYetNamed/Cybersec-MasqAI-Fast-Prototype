@@ -17,7 +17,9 @@ COMMAND_TIMEOUT_S = 120
 RUN_TIMEOUT_S = 15 * 60
 # Without a cap, OpenRouter reserves the model's maximum output (65k tokens) against the balance and answers 402.
 MAX_TOKENS = 2048
-GUARD_NOTICE = "[MasqAI] Blocked tool call"
+# MasqAI's tool guardrail rejects a call by rewriting its arguments to a harmless command carrying this
+# text (tool_rejection "rewrite"), or with HTTP 400 masqai_tool_rejected ("error").
+GUARD_MARK = "MasqAI: the user's security profile rejected this execution"
 # Upstream rate limits (OpenRouter's new-account limit is 20 requests/minute) are retried, not run failures.
 RATE_LIMIT_RETRIES = 8
 SYSTEM = ("You are a coding agent working in a Linux sandbox. Use the bash tool to inspect and change files in the "
@@ -28,7 +30,7 @@ TOOLS = [{"type": "function", "function": {
     "description": "Run a bash command in the current directory. Returns the exit code and combined stdout/stderr.",
     "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]},
 }}]
-BLOCK_STATUSES = {502, 422, 404}
+BLOCK_STATUSES = {502, 422, 404, 400}
 
 
 @dataclass
@@ -36,7 +38,7 @@ class AgentResult:
     turns: int = 0
     blocked: bool = False
     block_status: int | None = None
-    # MasqAI's inbound guardrail answers a vetoed tool call with a normal assistant message, not an HTTP error.
+    # Tool calls MasqAI's inbound guardrail rejected by rewriting them (they still run, harmlessly).
     tool_calls_blocked: int = 0
     rate_limited: int = 0
     error: str | None = None
@@ -74,13 +76,14 @@ async def run_agent(client: httpx.AsyncClient, base_url: str, model: str, header
         calls = message.get("tool_calls") or []
         messages.append({k: v for k, v in message.items() if k in {"role", "content", "tool_calls"}} | {"role": "assistant"})
         if not calls:
-            result.tool_calls_blocked += (message.get("content") or "").count(GUARD_NOTICE)
             return result
         for call in calls:
             try:
                 command = json.loads(call["function"].get("arguments") or "{}").get("command", "")
             except ValueError:
                 command = ""
+            if GUARD_MARK in command:
+                result.tool_calls_blocked += 1
             if not command:
                 output = "error: the bash tool needs a JSON argument {\"command\": \"...\"}"
             else:

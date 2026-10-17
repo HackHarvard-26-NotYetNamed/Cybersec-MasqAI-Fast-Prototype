@@ -115,7 +115,8 @@ All modifications by the security model are strictly occurrence-bound (targeting
 * **Inline Inbound Inspection (The Tool Guardrail):**
   * Evaluated across both complete and **streamed responses** (SSE).
   * High-precision network detection ensures benign local operations (local file inspection, SQLite DB queries) pass instantly without latency or false alarms.
-  * If outbound network exfiltration vectors (`curl`, `http://`, `https://`, sockets) are detected carrying sensitive placeholders, the call is intercepted (failing closed on errors/timeouts) and replaced with an assistant notification block (`> [MasqAI] Blocked tool call...`), terminating the turn safely.
+  * If outbound network exfiltration vectors (`curl`, `http://`, `https://`, sockets) are detected carrying sensitive placeholders, the call is rejected (failing closed on errors/timeouts). `security.tool_rejection` picks how: `rewrite` (default) keeps the call but its arguments become `echo "MasqAI: the user's security profile rejected this execution"`, so the untrusted model reads the rejection and the session continues; `error` wipes the call and returns HTTP 400 `masqai_tool_rejected` (or an error event ending the stream, if text was already sent).
+  * In a stream, every frame from the first tool call on is held until the upstream finishes, restored as usual, then inspected whole before release.
 * Server-side tools and assistant responses shown to the user retain placeholders.
 * In streaming mode, the restore engine buffers up to 96 trailing characters that could match a placeholder prefix, preventing split-token leakage across chunk boundaries.
 

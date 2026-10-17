@@ -120,29 +120,75 @@ def extract_inbound_tool_calls(data: dict[str, Any]) -> list[dict[str, Any]]:
     return calls
 
 
-def block_inbound_tool_call(data: dict[str, Any], call: dict[str, Any], reason: str) -> dict[str, Any]:
-    """Replace a blocked tool call with an assistant explanation block so the turn finishes normally."""
+# Active tool rejection. A rejected call keeps its shape, but every string in its arguments becomes
+# this fixed, harmless command: a shell tool echoes it, any other tool fails on it and shows it, and
+# either way the untrusted model reads the rejection as the tool's result. The security model's reason
+# is never put in here: it is shaped by untrusted text and must not reach a shell.
+REJECTION_TEXT = "MasqAI: the user's security profile rejected this execution"
+REJECTED_COMMAND = f'echo "{REJECTION_TEXT}"'
+
+
+def rejected_value(value: Any) -> Any:
+    """`value` with every string replaced by REJECTED_COMMAND (numbers, booleans and keys unchanged)."""
+    if isinstance(value, str):
+        return REJECTED_COMMAND
+    if isinstance(value, list):
+        return [rejected_value(v) for v in value]
+    if isinstance(value, dict):
+        return {k: rejected_value(v) for k, v in value.items()}
+    return value
+
+
+def rejected_arguments(arguments: str) -> str:
+    """A JSON arguments string, rejected. Text that isn't a JSON object or array becomes the command."""
+    try:
+        value = json.loads(arguments)
+    except ValueError:
+        return json.dumps({"command": REJECTED_COMMAND})
+    if not isinstance(value, (dict, list)):
+        return json.dumps({"command": REJECTED_COMMAND})
+    return json.dumps(rejected_value(value), ensure_ascii=False)
+
+
+def rejected_shell_action(action: Any) -> Any:
+    """A Responses local_shell_call action, rejected: it runs `echo` instead."""
+    action = copy.deepcopy(action) if isinstance(action, dict) else {"type": "exec"}
+    action["command"] = ["echo", REJECTION_TEXT]
+    return action
+
+
+def reject_inbound_tool_call(data: dict[str, Any], call: dict[str, Any]) -> dict[str, Any]:
+    """A complete response with one inbound tool call rewritten (see REJECTION_TEXT)."""
     output = copy.deepcopy(data)
-    notice = f"> [MasqAI] Blocked tool call `{call['tool']}`: {reason}\n"
     typ = call.get("type")
-    if typ in ("chat", "chat_legacy"):
-        choice = output["choices"][call["choice_idx"]]
-        msg = choice.setdefault("message", {})
-        msg.pop("tool_calls", None)
-        msg.pop("function_call", None)
-        msg["role"] = "assistant"
-        msg["content"] = ((msg.get("content") or "") + "\n\n" + notice).strip()
-        choice["finish_reason"] = "stop"
+    if typ == "chat":
+        fn = output["choices"][call["choice_idx"]]["message"]["tool_calls"][call["call_idx"]]["function"]
+        fn["arguments"] = rejected_arguments(fn.get("arguments") or "")
+    elif typ == "chat_legacy":
+        fn = output["choices"][call["choice_idx"]]["message"]["function_call"]
+        fn["arguments"] = rejected_arguments(fn.get("arguments") or "")
     elif typ == "anthropic":
-        blocks = output.get("content", [])
-        idx = call["block_idx"]
-        blocks[idx] = {"type": "text", "text": notice}
-        output["stop_reason"] = "end_turn"
+        block = output["content"][call["block_idx"]]
+        block["input"] = rejected_value(block.get("input") or {})
     elif typ == "responses":
-        items = output.get("output", [])
-        idx = call["item_idx"]
-        items[idx] = {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": notice}]}
+        item = output["output"][call["item_idx"]]
+        reject_responses_item(item)
     return output
+
+
+def reject_responses_item(item: dict[str, Any]) -> None:
+    if item.get("type") == "function_call":
+        item["arguments"] = rejected_arguments(item.get("arguments") or "")
+    elif item.get("type") == "custom_tool_call":
+        item["input"] = REJECTED_COMMAND
+    elif item.get("type") == "local_shell_call":
+        item["action"] = rejected_shell_action(item.get("action"))
+
+
+def rejection_message(tool: str, reason: str) -> str:
+    """The text of an `error`-mode rejection (HTTP 400 or a stream error event). Not executed anywhere."""
+    return (f"MasqAI: the user's security profile rejected the tool call `{tool}` ({reason[:300]}). "
+            "Nothing was executed and no secret was restored.")
 
 
 def restore_response(data: dict[str, Any], table: dict[str, str]) -> dict[str, Any]:
