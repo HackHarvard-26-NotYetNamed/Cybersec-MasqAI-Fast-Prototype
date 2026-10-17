@@ -1,0 +1,7 @@
+# Vercel deploys only the site (project Root Directory: web). Never upload anything else,
+# in particular .env, .venv and eval outputs.
+/*
+!/web
+/web/node_modules
+/web/.next
+/web/.env*

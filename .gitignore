@@ -46,3 +46,5 @@ playground/uc3-secret-roundtrip/config/secrets.json
 *.log
 !playground/uc4-partial-key/logs/*.log
 !eval/cases/*/workspace/logs/*.log
+.vercel
+.env*
