@@ -11,7 +11,7 @@ const LINKS = [
   { href: "/results", label: "Results" },
   { href: "/how-it-works", label: "How it works" },
   { href: "/trust", label: "Key Enigma" },
-  { href: "/live", label: "Live" },
+  { href: "/run-it", label: "Run it" },
 ] as const;
 
 export function SiteHeader() {
