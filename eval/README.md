@@ -119,7 +119,7 @@ python -m eval.aggregate eval/out/runs.jsonl > web/public/data/results.json
 - `runs.jsonl`: one row per run, **append-only**. Clear it before a new campaign. Rows hold canary
   **type names** and counts, never values:
   `{"run_id", "case", "condition", "task_ok", "leaked": ["DB_PATH"], "leaked_count", "canary_count",
-  "relay_requests", "blocked", "block_status", "tool_calls_blocked", "prompt_tokens", "completion_tokens", "wall_ms", "llm_ms_p50"}`
+  "relay_requests", "blocked", "block_status", "tool_calls_blocked", "rate_limited", "prompt_tokens", "completion_tokens", "wall_ms", "llm_ms_p50"}`
 - `meta.json`: models, agent, sandbox provider, runs per case.
 - `injection.json`: from `--injection`.
 - `report.md`: a table per case, plus the 3 worst `masqai` runs with leaked canary types.
@@ -130,6 +130,11 @@ leak and **is** a task failure; report.md counts blocks separately.
 MasqAI's inbound tool guardrail vetoes a tool call by answering with a normal assistant message
 (`[MasqAI] Blocked tool call …`), so the agent simply stops. `tool_calls_blocked` counts those
 vetoes; report.md shows them as "tool calls vetoed", so a task failure they cause is visible.
+
+An upstream 429 is retried (up to 8 times, waiting for the limit's reset; the wait isn't counted as
+latency) and counted in `rate_limited`. A run that still ends in an error (`error` set) measured
+nothing: aggregate leaves it out of every metric and report.md lists it. OpenRouter limits new
+accounts to 20 requests per minute per model, so use `--concurrency 2` until that lifts.
 
 **Metrics:** `leakRate` is runs with at least one leak divided by runs. `taskSuccess` is `task_ok` runs
 divided by runs. `avgTokens` is mean prompt tokens per run, from the relay's `usage` fields.

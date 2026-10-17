@@ -2,6 +2,7 @@
 run's sandbox (see sandbox.py)."""
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from dataclasses import dataclass, field
@@ -17,6 +18,8 @@ RUN_TIMEOUT_S = 15 * 60
 # Without a cap, OpenRouter reserves the model's maximum output (65k tokens) against the balance and answers 402.
 MAX_TOKENS = 2048
 GUARD_NOTICE = "[MasqAI] Blocked tool call"
+# Upstream rate limits (OpenRouter's new-account limit is 20 requests/minute) are retried, not run failures.
+RATE_LIMIT_RETRIES = 8
 SYSTEM = ("You are a coding agent working in a Linux sandbox. Use the bash tool to inspect and change files in the "
           "current directory. Work step by step and verify your work. When the task is done, reply with a short summary "
           "and no tool call.")
@@ -35,6 +38,7 @@ class AgentResult:
     block_status: int | None = None
     # MasqAI's inbound guardrail answers a vetoed tool call with a normal assistant message, not an HTTP error.
     tool_calls_blocked: int = 0
+    rate_limited: int = 0
     error: str | None = None
     llm_ms: list[float] = field(default_factory=list)
     commands: int = 0
@@ -47,10 +51,16 @@ async def run_agent(client: httpx.AsyncClient, base_url: str, model: str, header
     deadline = time.monotonic() + RUN_TIMEOUT_S
     while result.turns < MAX_TURNS and time.monotonic() < deadline:
         result.turns += 1
-        started = time.monotonic()
-        response = await client.post(f"{base_url}/chat/completions", headers=headers,
-                                     json={"model": model, "messages": messages, "tools": TOOLS, "temperature": 0,
-                                           "max_tokens": MAX_TOKENS})
+        for attempt in range(RATE_LIMIT_RETRIES + 1):
+            started = time.monotonic()
+            response = await client.post(f"{base_url}/chat/completions", headers=headers,
+                                         json={"model": model, "messages": messages, "tools": TOOLS, "temperature": 0,
+                                               "max_tokens": MAX_TOKENS})
+            if response.status_code != 429 or attempt == RATE_LIMIT_RETRIES:
+                break
+            result.rate_limited += 1
+            await asyncio.sleep(_retry_after(response, attempt))
+        # Only the answered call is timed: waiting out a rate limit is not latency.
         result.llm_ms.append((time.monotonic() - started) * 1000)
         if response.status_code != 200:
             kind = _error_type(response)
@@ -79,6 +89,17 @@ async def run_agent(client: httpx.AsyncClient, base_url: str, model: str, header
                 output = f"exit {executed.exit_code}\n{executed.output}"
             messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": output})
     return result
+
+
+def _retry_after(response: httpx.Response, attempt: int) -> float:
+    """Seconds to wait after a 429: Retry-After, else OpenRouter's X-RateLimit-Reset (epoch ms), else backoff."""
+    try:
+        if "retry-after" in response.headers:
+            return min(max(float(response.headers["retry-after"]), 1.0), 65.0)
+        reset = response.json()["error"]["metadata"]["headers"]["X-RateLimit-Reset"]
+        return min(max(int(reset) / 1000 - time.time() + 1, 1.0), 65.0)
+    except (ValueError, KeyError, TypeError):
+        return min(5.0 * 2 ** attempt, 65.0)
 
 
 def _error_type(response: httpx.Response) -> str:

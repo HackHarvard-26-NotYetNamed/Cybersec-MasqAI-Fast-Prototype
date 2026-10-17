@@ -72,6 +72,7 @@ async def one_run(case: Case, condition: str, backend, http: httpx.AsyncClient) 
         row["turns"] = result.turns
         row["blocked"], row["block_status"] = result.blocked, result.block_status
         row["tool_calls_blocked"] = result.tool_calls_blocked
+        row["rate_limited"] = result.rate_limited
         row["error"] = result.error
         row["llm_ms_p50"] = round(statistics.median(result.llm_ms)) if result.llm_ms else None
         # check.sh arrives only now, so the agent could never read the expected answer.

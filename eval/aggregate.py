@@ -31,7 +31,17 @@ def metrics(runs: list[dict[str, Any]]) -> dict[str, float]:
     }
 
 
+def measured(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Runs that ended in an infrastructure error (a rate limit that outlasted the retries, a sandbox
+    failure) measured nothing: they are left out of the metrics and listed in report.md instead."""
+    errored = [r for r in rows if r.get("error")]
+    if errored:
+        print(f"aggregate: leaving out {len(errored)} run(s) that ended in an error (see report.md)", file=sys.stderr)
+    return [r for r in rows if not r.get("error")]
+
+
 def aggregate(rows: list[dict[str, Any]], meta: dict[str, Any], injection: list[dict[str, Any]]) -> dict[str, Any]:
+    rows = measured(rows)
     titles = {case.id: case.title for case in load_cases()}
     cases = []
     for case_id in sorted({r["case"] for r in rows}):
@@ -55,9 +65,14 @@ def aggregate(rows: list[dict[str, Any]], meta: dict[str, Any], injection: list[
 
 
 def report(rows: list[dict[str, Any]], results: dict[str, Any]) -> str:
+    errored = [r for r in rows if r.get("error")]
+    rows = [r for r in rows if not r.get("error")]
     lines = [f"# MasqAI eval report", "",
              f"{results['runsPerCase']} runs per case and condition · security model {results['securityModel']} · "
              f"untrusted model {results['untrustedModel']} · sandbox {results['sandbox']} · {results['generatedAt']}", ""]
+    if errored:
+        lines += [f"{len(errored)} run(s) ended in an infrastructure error and are left out of every number below:", "",
+                  "| run | error |", "|---|---|"] + [f"| {r['run_id']} | {r['error']} |" for r in errored] + [""]
     if results["placeholder"]:
         lines += ["> Self-test data (scripted fake model, local sandbox). Not measurements.", ""]
     for case in results["cases"]:
