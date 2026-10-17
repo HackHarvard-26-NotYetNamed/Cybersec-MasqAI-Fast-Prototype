@@ -118,28 +118,49 @@ class ModelRoute(BaseModel):
         return None if value == "" else value
 
 
+# Markers of a prompt written for the prototype's operation set. Loading one fails fast instead of
+# turning every request into a 502 (the prototype's stale-override bug).
+STALE_PROMPT_MARKERS = ("\"op\":\"collapse\"", "MASQ_BLOCK")
+
+
 class SecurityModelConfig(BaseModel):
     """The security model is given the new items, the N existing operations nearest to them (with k
     lines of context each), the mapping table, the whole conversation's user/assistant text, and the
     last `recent_items` tool results / reasoning items. Full mode is the same with N and k unlimited."""
+    model_config = ConfigDict(extra="forbid")
+
     enabled: bool = True
     provider: str | None = None
     model: str | None = None
     api_format: Literal["openai", "anthropic"] = "openai"
-    timeout_seconds: float = Field(45.0, gt=0)
+    # The security model reads raw context and the mapping table. A provider whose host is not
+    # literally loopback is refused (before anything is sent) unless this is true.
+    allow_remote_security_model: bool = False
+    timeout_s: float = Field(60.0, gt=0)
     context_mode: Literal["recent", "full"] = "recent"
     recent_items: int = Field(12, ge=0)
     nearest_ops: int = Field(-1, ge=-1)          # -1 = all existing operations
     op_context_lines: int = Field(2, ge=0)       # lines shown above and below each existing operation
-    # "auto": exact copies of known values are masked at token boundaries.
+    # "auto": exact copies of known values are masked at word boundaries.
     # "auto_veto": the same, and the security model may undo one automatic copy with an `unmask` operation.
-    auto_mask: Literal["auto", "auto_veto"] = "auto"
+    auto_mask: Literal["auto", "auto_veto"] = "auto_veto"
+    # Empty = the built-in prompt in masqai/prompts/security.md.
     system_prompt: str = ""
 
     @field_validator("provider", "model", mode="before")
     @classmethod
     def _blank_is_none(cls, value: Any) -> Any:
         return None if value == "" else value
+
+    @field_validator("system_prompt")
+    @classmethod
+    def _current_prompt(cls, value: str) -> str:
+        if value.strip():
+            if any(marker in value for marker in STALE_PROMPT_MARKERS):
+                raise ValueError("this prompt was written for the prototype (collapse / MASQ_BLOCK); clear it to use the built-in prompt")
+            if "operations" not in value:
+                raise ValueError('a custom prompt must ask for JSON {"operations": [...]}')
+        return value
 
 
 class CustomValue(BaseModel):
@@ -149,24 +170,45 @@ class CustomValue(BaseModel):
 
 
 class DetectorConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     custom_values: list[CustomValue] = Field(default_factory=list)
     detect_host_identifiers: bool = True
+    rules_dir: str = "masqai/rules"
 
 
-# Always dropped, in either mode: auth headers MasqAI sets itself for the configured provider,
-# and hop-by-hop / framing headers that httpx must compute for the new connection.
+class RetentionConfig(BaseModel):
+    """Sessions live in RAM only. Idle ones expire; past the cap the least recently used goes first.
+    A session with a request in flight or an open stream is never evicted."""
+    model_config = ConfigDict(extra="forbid")
+
+    idle_ttl_h: float = Field(12.0, gt=0)
+    max_sessions: int = Field(50, ge=1)
+
+
+# Always dropped, in either mode: auth headers MasqAI sets itself for the configured provider, its own
+# control headers, and hop-by-hop / framing headers that httpx must compute for the new connection.
+# user-agent is replaced by headers.user_agent (see HeaderPolicy.user_agent).
 ALWAYS_DROPPED_HEADERS = [
-    "authorization", "proxy-authorization", "x-api-key",
+    "authorization", "proxy-authorization", "x-api-key", "x-masqai-*",
     "host", "content-length", "connection", "keep-alive", "transfer-encoding", "te", "trailer",
     "upgrade", "proxy-authenticate", "accept-encoding",
 ]
-# Editable defaults. Blocklist: other providers' credentials and cookies. Everything else is
-# forwarded so the gateway stays transparent.
-DEFAULT_HEADER_BLOCKLIST = ["api-key", "x-goog-api-key", "cookie"]
-DEFAULT_HEADER_ALLOWLIST = [
-    "accept", "content-type", "user-agent", "openai-beta", "openai-organization", "openai-project",
-    "anthropic-beta", "anthropic-version", "http-referer", "x-title", "x-stainless-*",
+# Editable defaults. Blocklist: other providers' credentials, cookies, client fingerprints (OS, arch,
+# runtime, SDK version), client session ids (read locally as soft hints first) and proxy / referer
+# metadata. -retry-count and -timeout stay: they carry no identity.
+DEFAULT_HEADER_BLOCKLIST = [
+    "api-key", "x-goog-api-key", "cookie",
+    "x-stainless-os", "x-stainless-arch", "x-stainless-runtime", "x-stainless-runtime-version",
+    "x-stainless-package-version", "x-stainless-lang",
+    "x-session-id", "session-id", "x-conversation-id", "conversation-id", "x-request-id",
+    "x-forwarded-*", "x-real-ip", "forwarded", "via", "http-referer", "x-title",
 ]
+DEFAULT_HEADER_ALLOWLIST = [
+    "accept", "content-type", "openai-beta", "openai-organization", "openai-project",
+    "anthropic-beta", "anthropic-version", "x-stainless-retry-count", "x-stainless-timeout",
+]
+DEFAULT_USER_AGENT = "masqai/0.2.0"
 
 
 class HeaderPolicy(BaseModel):
@@ -178,7 +220,11 @@ class HeaderPolicy(BaseModel):
     dropped in both modes; the provider's own auth and `provider.headers` are added afterwards.
     Headers named in the request's `Connection` header are hop-by-hop and also dropped.
     """
+    model_config = ConfigDict(extra="forbid")
+
     mode: Literal["blocklist", "allowlist"] = "blocklist"
+    # Replaces the client's User-Agent. Empty forwards the client's own.
+    user_agent: str = DEFAULT_USER_AGENT
     blocklist: list[str] = Field(default_factory=lambda: list(DEFAULT_HEADER_BLOCKLIST))
     allowlist: list[str] = Field(default_factory=lambda: list(DEFAULT_HEADER_ALLOWLIST))
 
@@ -194,12 +240,16 @@ class HeaderPolicy(BaseModel):
     def allows(self, name: str) -> bool:
         if self._matches(name, ALWAYS_DROPPED_HEADERS):
             return False
+        if name.lower() == "user-agent" and self.user_agent:
+            return False  # replaced, see upstream.headers_for
         if self.mode == "allowlist":
             return self._matches(name, self.allowlist)
         return not self._matches(name, self.blocklist)
 
 
 class GatewayConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     host: str = "127.0.0.1"
     port: int = Field(8787, ge=1, le=65535)
     upstream_timeout_seconds: float = Field(180.0, gt=0)
@@ -209,7 +259,17 @@ class GatewayConfig(BaseModel):
     security: SecurityModelConfig = Field(default_factory=SecurityModelConfig)
     detectors: DetectorConfig = Field(default_factory=DetectorConfig)
     headers: HeaderPolicy = Field(default_factory=HeaderPolicy)
-    allow_remote_security_model: bool = True
+    retention: RetentionConfig = Field(default_factory=RetentionConfig)
+    # Content types MasqAI can't inspect (images in OpenAI format, files, audio, ...): false refuses the
+    # request with 422 before a session exists; true forwards them raw with a warning.
+    pass_unknown: bool = False
+
+    @field_validator("host")
+    @classmethod
+    def _loopback_only(cls, value: str) -> str:
+        if value != "127.0.0.1":
+            raise ValueError("MasqAI binds to 127.0.0.1 only")
+        return value
 
     @model_validator(mode="after")
     def _references(self) -> "GatewayConfig":

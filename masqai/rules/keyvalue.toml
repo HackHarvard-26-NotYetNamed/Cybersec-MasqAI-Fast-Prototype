@@ -1,0 +1,12 @@
+# Generic key=value / key: value detector. A key whose last word is one of `names`, followed by `=` or
+# `:`, has its VALUE masked (never the key). DB_PASSWORD=..., "api_key": "...", token: ... all match;
+# max_tokens: 4096 does not (the key must end with the name).
+
+names = [
+  "password", "passwd", "pwd", "pass", "secret", "token", "api_key", "apikey", "access_key",
+  "client_secret", "auth", "secret_key", "private_key", "access_token", "refresh_token",
+  "auth_token", "bearer", "credentials", "session_key",
+]
+min_length = 6
+# Values that are clearly not secrets.
+ignore_values = ["true", "false", "null", "none", "required", "optional", "string", "changeme_placeholder"]

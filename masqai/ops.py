@@ -1,8 +1,9 @@
-"""Occurrence-bound masking and collapsing.
+"""Occurrence-bound operations: mask (reversible), hide and replace (lossy rephrasing), relink, unmask.
 
 The security model never defines string replacers. Every operation it returns points at exactly one
-occurrence: (item, line, text, nth) for a mask, (item, start line, end line) for a collapse. This module
-resolves those addresses, validates each operation on its own, and renders an item's outbound text.
+occurrence: (item, line, text, nth) for a mask or a replace, (item, start line, end line) for a hide.
+This module resolves those addresses, validates each operation on its own, and renders an item's
+outbound text.
 
 Exact copies of a known value's canonical text are masked automatically ("auto masks"), but only at
 token boundaries: a match whose neighbouring character is a letter, digit or underscore is left as-is
@@ -16,10 +17,12 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from .model import CollapseOp, ContextItem, Entity, MaskOp, Session
+from .model import ContextItem, Entity, HideOp, MaskOp, ReplaceOp, Session
 
 MIN_AUTO_LENGTH = 3        # shorter canonical values are masked only where an operation points
-MAX_SUMMARY = 200
+MAX_SUMMARY = 200          # hide summaries and replace substitutes
+MAX_REASON = 300
+CLASSES = ("secret", "intel")
 TYPE_RE = re.compile(r"[A-Z][A-Z0-9_]*")
 PLACEHOLDER_RE = re.compile(r"<\$?[A-Z][A-Z0-9_]*_[a-f0-9]{8}>")
 
@@ -94,7 +97,7 @@ def numbered(text: str, first: int = 1, last: int | None = None) -> list[dict[st
     return [{"n": n, "raw": lines[n - 1]} for n in range(max(1, first), last + 1)]
 
 
-# ---------- planning: which spans are masked, which lines collapsed ----------
+# ---------- planning: which spans are masked, which lines hidden, which texts replaced ----------
 
 @dataclass
 class Span:
@@ -167,37 +170,49 @@ def placeholder(session: Session, token: str, alias: bool) -> str:
     return root.token.replace("<", "<$", 1) if alias or root is not entity else root.token
 
 
-def render(session: Session, text: str, spans: list[Span], collapses: list[CollapseOp]) -> tuple[str, list[dict], list[dict]]:
-    """Outbound text plus the masks/collapses actually applied (in original-text offsets)."""
+def hidden_marker(summary: str) -> str:
+    return f"…[hidden: {summary}]…"
+
+
+def render(session: Session, text: str, spans: list[Span], hides: list[HideOp],
+           replaces: list[ReplaceOp] | None = None) -> tuple[str, list[dict], list[dict], list[dict]]:
+    """Outbound text plus the masks, hides and replaces actually applied (in original-text offsets)."""
     starts = line_starts(text)
     regions = []
-    for op in sorted(collapses, key=lambda c: c.start_line):
+    for op in sorted(hides, key=lambda c: c.start_line):
         begin = starts[op.start_line - 1]
         end = (starts[op.end_line] - 1) if op.end_line < len(starts) else len(text)
         regions.append([begin, end, op])
-    # A mask crossing a collapse boundary widens the collapse, so no part of the value stays raw.
+    # A mask crossing a hidden range widens the range, so no part of the value stays raw.
     for region in regions:
         for span in spans:
             if span.start < region[1] and region[0] < span.end:
                 region[0], region[1] = min(region[0], span.start), max(region[1], span.end)
-    events = [(r[0], r[1], "collapse", r[2]) for r in regions]
-    events += [(s.start, s.end, "mask", s) for s in spans if not any(r[0] <= s.start and s.end <= r[1] for r in regions)]
+    inside = lambda a, b: any(r[0] <= a and b <= r[1] for r in regions)
+    events = [(r[0], r[1], "hide", r[2]) for r in regions]
+    events += [(s.start, s.end, "mask", s) for s in spans if not inside(s.start, s.end)]
+    # A replace never overlaps a mask (validated); one inside a hidden range is simply hidden.
+    events += [(r.start, r.end, "replace", r) for r in (replaces or []) if not inside(r.start, r.end)]
     events.sort(key=lambda e: e[0])
-    out, applied_masks, applied_collapses, cursor = [], [], [], 0
+    out, applied_masks, applied_hides, applied_replaces, cursor = [], [], [], [], 0
     for start, end, kind, op in events:
         if start < cursor:
             continue
         out.append(text[cursor:start])
-        if kind == "collapse":
-            out.append(f"…[MASQ_BLOCK: {op.summary}]…")
-            applied_collapses.append({"start": start, "end": end, "start_line": op.start_line, "end_line": op.end_line, "summary": op.summary})
+        if kind == "hide":
+            out.append(hidden_marker(op.summary))
+            applied_hides.append({"start": start, "end": end, "start_line": op.start_line, "end_line": op.end_line,
+                                  "summary": op.summary, "class": op.cls, "reason": op.reason})
+        elif kind == "replace":
+            out.append(op.replacement)
+            applied_replaces.append({"start": start, "end": end, "with": op.replacement, "class": op.cls, "reason": op.reason})
         else:
             ph = placeholder(session, op.token, op.alias)
             out.append(ph)
             applied_masks.append({"start": start, "end": end, "token": op.token, "placeholder": ph, "alias": ph.startswith("<$"), "origin": op.origin})
         cursor = end
     out.append(text[cursor:])
-    return "".join(out), applied_masks, applied_collapses
+    return "".join(out), applied_masks, applied_hides, applied_replaces
 
 
 def model_spans(session: Session, item_id: str) -> list[Span]:
@@ -205,30 +220,35 @@ def model_spans(session: Session, item_id: str) -> list[Span]:
             if isinstance(op, MaskOp) and op.token in session.entities]
 
 
-def collapses_of(session: Session, item_id: str) -> list[CollapseOp]:
-    return [op for op in session.ops.get(item_id, []) if isinstance(op, CollapseOp)]
+def hides_of(session: Session, item_id: str) -> list[HideOp]:
+    return [op for op in session.ops.get(item_id, []) if isinstance(op, HideOp)]
+
+
+def replaces_of(session: Session, item_id: str) -> list[ReplaceOp]:
+    return [op for op in session.ops.get(item_id, []) if isinstance(op, ReplaceOp)]
 
 
 def plan_item(session: Session, item: ContextItem) -> None:
     """Compute item.sanitized from the session's operations and known values."""
-    if item.reasoning or not isinstance(item.original, str):
-        item.sanitized, item.spans, item.unmasked, item.collapses = item.original, [], [], []
+    if item.reasoning or item.opaque or not isinstance(item.original, str):
+        item.sanitized, item.spans, item.unmasked, item.hides, item.replaces = item.original, [], [], [], []
         item.changed = False
         return
     text = item.original
     autos, skipped = auto_spans(session, item.id, text)
     spans = resolve(model_spans(session, item.id) + autos)
-    sanitized, masks, collapses = render(session, text, spans, collapses_of(session, item.id))
+    hides, replaces = hides_of(session, item.id), replaces_of(session, item.id)
+    sanitized, masks, applied_hides, applied_replaces = render(session, text, spans, hides, replaces)
     if item.json_value and not _parses(sanitized):
         # An automatic copy straddled JSON syntax (a known value that contains quotes or braces).
         # Keep only the model's masks, which were checked against the JSON when they were added.
         spans = resolve(model_spans(session, item.id))
-        sanitized, masks, collapses = render(session, text, spans, collapses_of(session, item.id))
+        sanitized, masks, applied_hides, applied_replaces = render(session, text, spans, hides, replaces)
         if not _parses(sanitized):
             raise ValueError(f"masking would break the JSON of tool arguments in item {item.id}")
-    covered = [(m["start"], m["end"]) for m in masks] + [(c["start"], c["end"]) for c in collapses]
+    covered = [(m["start"], m["end"]) for m in masks] + [(c["start"], c["end"]) for c in applied_hides + applied_replaces]
     item.unmasked = [s for s in skipped if not any(a <= s["start"] and s["end"] <= b for a, b in covered)]
-    item.sanitized, item.spans, item.collapses = sanitized, masks, collapses
+    item.sanitized, item.spans, item.hides, item.replaces = sanitized, masks, applied_hides, applied_replaces
     item.changed = sanitized != item.original
 
 
@@ -262,6 +282,22 @@ def _parses(text: str) -> bool:
         return False
 
 
+def _cls(op: dict[str, Any], default: str) -> str:
+    value = op.get("class", default)
+    if value not in CLASSES:
+        raise OpError('class must be "secret" or "intel"')
+    return value
+
+
+def _reason(op: dict[str, Any]) -> str | None:
+    value = op.get("reason")
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise OpError("reason must be a string")
+    return value.strip()[:MAX_REASON] or None
+
+
 class Applier:
     """Validates operations one by one and applies the valid ones to the session."""
 
@@ -274,14 +310,14 @@ class Applier:
         self.labels: dict[str, str] = {}
         self.new_entities: list[str] = []
 
-    def item(self, ref: Any, *, tool_result: bool = False) -> ContextItem:
+    def item(self, ref: Any, *, tool_result: bool = False, what: str = "") -> ContextItem:
         item = self.refs.get(ref) if isinstance(ref, str) else None
         if item is None:
             raise OpError(f"unknown item {ref!r}; use a ref such as \"#3\" from the input")
-        if item.reasoning or not item.eligible or not isinstance(item.original, str):
-            raise OpError(f"item {ref} cannot be edited (system prompt, tool description or reasoning)")
+        if item.reasoning or item.opaque or not item.eligible or not isinstance(item.original, str):
+            raise OpError(f"item {ref} cannot be edited (reasoning or opaque content)")
         if tool_result and item.kind != "tool_result":
-            raise OpError(f"item {ref} is a {item.kind}; only tool results can be collapsed")
+            raise OpError(f"item {ref} is a {item.kind}; {what} only applies to tool results")
         return item
 
     def apply(self, operations: Any) -> list[dict[str, Any]]:
@@ -309,25 +345,31 @@ class Applier:
         kind = op.get("op")
         if kind == "mask":
             return self.mask(op)
-        if kind == "collapse":
-            return self.collapse(op)
+        if kind == "hide":
+            return self.hide(op)
+        if kind == "replace":
+            return self.replace(op)
         if kind == "relink":
             return self.relink(op)
         if kind == "unmask":
             return self.unmask(op)
-        raise OpError(f"unknown op {kind!r}; expected mask, collapse, relink" + (" or unmask" if self.allow_veto else ""))
+        raise OpError(f"unknown op {kind!r}; expected mask, hide, replace, relink" + (" or unmask" if self.allow_veto else ""))
+
+    def _locate(self, item: ContextItem, op: dict[str, Any]) -> tuple[int, int]:
+        try:
+            return locate(item.original, op.get("line"), op.get("text"), op.get("nth", 1))
+        except ValueError as exc:
+            raise OpError(str(exc)) from None
 
     # --- mask ---
     def mask(self, op: dict[str, Any]) -> str:
         item = self.item(op.get("item"))
-        try:
-            start, end = locate(item.original, op.get("line"), op.get("text"), op.get("nth", 1))
-        except ValueError as exc:
-            raise OpError(str(exc)) from None
+        start, end = self._locate(item, op)
         text = item.original[start:end]
         alias = op.get("alias", False)
         if not isinstance(alias, bool):
             raise OpError("alias must be true or false")
+        cls, reason = _cls(op, "secret"), _reason(op)
         session = self.session
         if op.get("token"):
             token = _token(session, self.labels, op["token"])
@@ -342,6 +384,8 @@ class Applier:
             if not isinstance(entity_type, str) or not TYPE_RE.fullmatch(entity_type):
                 raise OpError("type must be uppercase letters, digits and underscores, starting with a letter")
             existing = session.entity_for(text)
+        if any(r.start < end and start < r.end for r in replaces_of(session, item.id)):
+            raise OpError("this text overlaps a replaced occurrence; it is already rephrased")
         # Overlap rules against what is already masked in this item (before any new entity exists).
         current = resolve(model_spans(session, item.id) + auto_spans(session, item.id, item.original)[0])
         for span in current:
@@ -355,7 +399,7 @@ class Applier:
             elif span.start < end and start < span.end:
                 if span.start <= start and end <= span.end:
                     # Nothing leaks here; still record a new value so its other exact copies are masked.
-                    token = existing.token if existing else session.new_entity(text, op.get("type", "SECRET")).token
+                    token = existing.token if existing else session.new_entity(text, op.get("type", "SECRET"), "model", cls, reason).token
                     if not existing:
                         self.new_entities.append(token)
                     self._label(op, token)
@@ -363,8 +407,8 @@ class Applier:
                 if not (start <= span.start and span.end <= end):
                     raise OpError(f"crosses the masked text {item.original[span.start:span.end]!r}; mask a range that contains it or does not touch it")
         created = existing is None
-        token = existing.token if existing else session.new_entity(text, op.get("type", "SECRET")).token
-        new = MaskOp(item.id, start, end, token, alias, text, "model", self.request)
+        token = existing.token if existing else session.new_entity(text, op.get("type", "SECRET"), "model", cls, reason).token
+        new = MaskOp(item.id, start, end, token, alias, text, "model", self.request, reason)
         session.ops.setdefault(item.id, []).append(new)
         if _parses(item.original):
             probe = ContextItem(item.id, item.kind, item.role, item.original, item.original, json_value=item.json_value)
@@ -389,9 +433,21 @@ class Applier:
         if isinstance(label, str) and label:
             self.labels[label] = token
 
-    # --- collapse ---
-    def collapse(self, op: dict[str, Any]) -> str:
-        item = self.item(op.get("item"), tool_result=True)
+    def _check_rephrase(self, value: Any, what: str) -> str:
+        """A hide summary or replace substitute: one short line, no sensitive value, no placeholder."""
+        if not isinstance(value, str) or not value.strip() or len(value) > MAX_SUMMARY or "\n" in value or "\r" in value:
+            raise OpError(f"{what} must be one non-empty line of at most {MAX_SUMMARY} characters")
+        value = value.strip()
+        for known, ph in self.session.known_values():
+            if len(known) >= MIN_AUTO_LENGTH and known in value:
+                raise OpError(f"{what} contains the sensitive value masked as {ph}")
+        if PLACEHOLDER_RE.search(value):
+            raise OpError(f"{what} must not contain placeholders")
+        return value
+
+    # --- hide (rephrase: a whole-line range of a tool result) ---
+    def hide(self, op: dict[str, Any]) -> str:
+        item = self.item(op.get("item"), tool_result=True, what="hide")
         lines = item.original.split("\n")
         start, end = op.get("start"), op.get("end")
         if type(start) is not int or type(end) is not int or not (1 <= start <= end <= len(lines)):
@@ -400,23 +456,37 @@ class Applier:
             raise OpError(f"first must equal raw line {start} exactly: {lines[start - 1][:300]!r}")
         if lines[end - 1] != op.get("last"):
             raise OpError(f"last must equal raw line {end} exactly: {lines[end - 1][:300]!r}")
-        summary = op.get("summary")
-        if not isinstance(summary, str) or not summary.strip() or len(summary) > MAX_SUMMARY or "\n" in summary or "\r" in summary:
-            raise OpError(f"summary must be one non-empty line of at most {MAX_SUMMARY} characters")
-        summary = summary.strip()
-        for value, ph in self.session.known_values():
-            if len(value) >= MIN_AUTO_LENGTH and value in summary:
-                raise OpError(f"summary contains the sensitive value masked as {ph}")
-        if PLACEHOLDER_RE.search(summary):
-            raise OpError("summary must not contain placeholders")
-        for other in collapses_of(self.session, item.id):
+        summary = self._check_rephrase(op.get("summary"), "summary")
+        cls, reason = _cls(op, "intel"), _reason(op)
+        for other in hides_of(self.session, item.id):
             if other.start_line <= end and start <= other.end_line:
                 if (other.start_line, other.end_line) == (start, end):
-                    other.summary = summary
+                    other.summary, other.reason = summary, reason or other.reason
                     return "summary updated"
-                raise OpError(f"overlaps the collapsed lines {other.start_line}-{other.end_line}")
-        self.session.ops.setdefault(item.id, []).append(CollapseOp(item.id, start, end, summary, lines[start - 1], lines[end - 1], self.request))
-        return f"lines {start}-{end} collapsed"
+                raise OpError(f"overlaps the hidden lines {other.start_line}-{other.end_line}")
+        self.session.ops.setdefault(item.id, []).append(
+            HideOp(item.id, start, end, summary, lines[start - 1], lines[end - 1], self.request, cls, reason))
+        return f"lines {start}-{end} hidden"
+
+    # --- replace (rephrase: one occurrence of a tool result) ---
+    def replace(self, op: dict[str, Any]) -> str:
+        item = self.item(op.get("item"), tool_result=True, what="replace")
+        start, end = self._locate(item, op)
+        replacement = self._check_rephrase(op.get("with"), "with")
+        cls, reason = _cls(op, "intel"), _reason(op)
+        session = self.session
+        current = resolve(model_spans(session, item.id) + auto_spans(session, item.id, item.original)[0])
+        if any(s.start < end and start < s.end for s in current):
+            raise OpError("this text overlaps a masked value; masks and replaces must not overlap")
+        for other in replaces_of(session, item.id):
+            if other.start < end and start < other.end:
+                if (other.start, other.end) == (start, end):
+                    other.replacement, other.reason = replacement, reason or other.reason
+                    return "substitute updated"
+                raise OpError(f"overlaps the replaced text {other.text!r}")
+        session.ops.setdefault(item.id, []).append(
+            ReplaceOp(item.id, start, end, item.original[start:end], replacement, self.request, cls, reason))
+        return f"replaced with {replacement!r}"
 
     # --- relink ---
     def relink(self, op: dict[str, Any]) -> str:
@@ -427,6 +497,8 @@ class Applier:
         if self.session.entities[old].merged_into:
             raise OpError(f"{old} is already linked to {self.session.entities[old].merged_into}")
         self.session.entities[old].merged_into = new
+        self.session.relinks.append({"from": old, "to": placeholder(self.session, old, True), "request": self.request,
+                                     "reason": _reason(op)})
         return f"{old} is now sent as {placeholder(self.session, old, True)}"
 
     # --- unmask (veto an automatic mask) ---
@@ -434,12 +506,10 @@ class Applier:
         if not self.allow_veto:
             raise OpError("unmask is disabled in this configuration")
         item = self.item(op.get("item"))
-        try:
-            start, end = locate(item.original, op.get("line"), op.get("text"), op.get("nth", 1))
-        except ValueError as exc:
-            raise OpError(str(exc)) from None
+        start, end = self._locate(item, op)
         autos, _ = auto_spans(self.session, item.id, item.original)
         if not any(s.start == start and s.end == end for s in autos):
             raise OpError("unmask only applies to an automatic copy of a known value at exactly this position")
         self.session.vetoes.setdefault(item.id, set()).add((start, end))
+        self.session.veto_reasons[(item.id, start, end)] = _reason(op)
         return "automatic mask removed at this occurrence"
