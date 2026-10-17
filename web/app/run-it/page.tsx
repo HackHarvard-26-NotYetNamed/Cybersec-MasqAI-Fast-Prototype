@@ -12,8 +12,9 @@ export default function RunItPage() {
   return (
     <div className="mx-auto max-w-7xl space-y-10 px-4 py-8 sm:px-6 sm:py-10">
       <PageIntro eyebrow="Run it" title="The live view lives on your machine">
-        This site only replays synthetic sessions. To watch real traffic, run the gateway yourself and open its
-        built-in GUI.
+        The <a href="/try" className="text-foreground underline underline-offset-4">playground</a> runs the
+        gateway&apos;s detector rules in your browser. To watch a real agent go through the security model and the
+        tool-call check, run the gateway yourself and open its built-in GUI.
       </PageIntro>
 
       <section aria-labelledby="why" className="rounded-xl border bg-card p-5">

@@ -53,7 +53,7 @@ export function ReplayTheater() {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <div role="group" aria-label="Use case" className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8">
         {replays.map((r) => {
           const active = r.id === current.id;
@@ -194,21 +194,20 @@ function Player({ replay }: { replay: Replay }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-4 rounded-lg border bg-card p-4 lg:flex-row lg:items-start">
-        <div className="flex-1">
-          <h2 className="text-xl font-semibold">
-            <span className="mr-2 font-mono text-muted-foreground">{ucLabel(replay.id)}</span>
-            {replay.title}
-          </h2>
-          <p className="mt-1 text-pretty text-muted-foreground">{replay.summary}</p>
-        </div>
-        <UnprotectedSwitch on={unprotected} onChange={setUnprotected} />
-      </div>
-
-      <HygieneStrip headers={replay.headersStripped} fields={replay.pseudonymized} />
-
+      {/* One compact card: what this replay is, the before/after switch, and the controls. On a projector the
+          two panes below must start within the first screen. */}
       <div className="rounded-lg border bg-card p-3 sm:p-4">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
+          <div className="flex-1">
+            <h2 className="text-xl font-semibold">
+              <span className="mr-2 font-mono text-muted-foreground">{ucLabel(replay.id)}</span>
+              {replay.title}
+            </h2>
+            <p className="mt-0.5 text-pretty text-muted-foreground">{replay.summary}</p>
+          </div>
+          <UnprotectedSwitch on={unprotected} onChange={setUnprotected} />
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
           <ControlButton label={playing ? "Pause (space)" : "Play (space)"} onClick={togglePlay} primary>
             {playing ? <Pause aria-hidden className="size-4" /> : <Play aria-hidden className="size-4" />}
             <span>{playing ? "Pause" : i >= last ? "Replay" : "Play"}</span>
@@ -323,6 +322,7 @@ function Player({ replay }: { replay: Replay }) {
         </div>
       </div>
 
+      <HygieneStrip headers={replay.headersStripped} fields={replay.pseudonymized} />
       <Legend />
     </div>
   );

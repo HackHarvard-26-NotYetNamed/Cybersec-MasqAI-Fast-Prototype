@@ -9,11 +9,10 @@ export const metadata: Metadata = {
 
 export default function DemoPage() {
   return (
-    <div className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 sm:py-10">
+    <div className="mx-auto max-w-7xl space-y-4 px-4 py-6 sm:px-6">
       <PageIntro eyebrow="Replay theater" title="Same session, two views">
-        Each replay is a recorded coding-agent session from the synthetic playground. On the left is what the agent
-        produced. On the right is what the untrusted relay received. Flip <strong className="text-foreground">Without
-        MasqAI</strong> to see the baseline.
+        Left: what the agent sent. Right: what the untrusted model received. Flip{" "}
+        <strong className="text-foreground">Without MasqAI</strong> for the baseline.
       </PageIntro>
       <ReplayTheater />
     </div>
