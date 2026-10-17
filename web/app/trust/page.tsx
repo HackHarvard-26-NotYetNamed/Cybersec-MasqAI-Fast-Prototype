@@ -12,8 +12,10 @@ export default function TrustPage() {
   return (
     <div className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6 sm:py-10">
       <PageIntro eyebrow="Protecting the key" title="Key Enigma and honeytokens">
-        The sanitizer protects what you send. These two features protect the key you send it with. Both are planned
-        for this weekend; the timeline below is simulated.
+        The sanitizer protects what you send. These two features protect the key you send it with. Both are stretch
+        goals: while <code className="font-mono text-foreground">keys.json</code> says{" "}
+        <code className="font-mono text-foreground">&quot;status&quot;: &quot;planned&quot;</code>, this page is a design
+        preview.
       </PageIntro>
 
       <div className="grid gap-4 md:grid-cols-2">
@@ -23,7 +25,7 @@ export default function TrustPage() {
             Key Enigma
           </h2>
           <p className="mt-2 text-pretty text-muted-foreground">
-            MasqAI holds the provider credentials and keeps issuing short-lived upstream keys. Each key is active for a
+            The gateway holds the provider credentials and keeps issuing short-lived upstream keys. Each key is active for a
             few minutes, stays valid for a short grace period so in-flight requests finish, then is revoked. A key that
             leaks stops working soon after.
           </p>
@@ -35,7 +37,8 @@ export default function TrustPage() {
           </h2>
           <p className="mt-2 text-pretty text-muted-foreground">
             MasqAI plants a canary key in outgoing context. Nothing legitimate ever uses it. If it is ever used, the
-            endpoint that saw it was logging and reusing your traffic, and MasqAI marks that endpoint untrustworthy.
+            untrusted model’s operator was logging and reusing your traffic, and MasqAI marks that endpoint
+            untrustworthy.
           </p>
         </article>
       </div>

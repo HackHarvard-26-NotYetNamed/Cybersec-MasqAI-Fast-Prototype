@@ -20,10 +20,13 @@ function KeyTrustBody({ data }: { data: Keys }) {
       {data.status === "planned" ? (
         <p
           role="note"
-          className="flex items-center gap-2 rounded-lg border-2 border-dashed border-ent-key/70 bg-ent-key/10 px-4 py-3 font-mono font-semibold text-ent-key"
+          className="flex flex-wrap items-center gap-2 rounded-lg border-2 border-dashed border-foreground/40 bg-card px-4 py-3"
         >
+          <span className="rounded-full bg-foreground px-2.5 py-0.5 font-mono text-sm font-bold text-background">Planned</span>
           <FlaskConical aria-hidden className="size-5 shrink-0" />
-          PLACEHOLDER — simulated timeline. Key Enigma and honeytokens are planned features.
+          <span className="font-medium">
+            Design preview. Key Enigma and honeytokens are stretch goals; this timeline is simulated.
+          </span>
         </p>
       ) : null}
 
@@ -35,8 +38,11 @@ function KeyTrustBody({ data }: { data: Keys }) {
         >
           <TriangleAlert aria-hidden className="mt-1 size-5 shrink-0 text-leak" />
           <span>
-            <strong className="font-semibold text-leak">Canary key used from {h.usedBy ?? "an unknown endpoint"}</strong>
-            : endpoint marked {h.verdict}. <span className="text-muted-foreground">({h.label}, planted at {fmt(h.plantedAt)}, used at {fmt(h.usedAt!)})</span>
+            <strong className="font-semibold text-leak">Canary used by {h.usedBy ?? "an unknown endpoint"}</strong>: endpoint
+            marked {h.verdict}.{" "}
+            <span className="text-muted-foreground">
+              ({h.label}, planted at {fmt(h.plantedAt)}, used at {fmt(h.usedAt!)})
+            </span>
           </span>
         </p>
       ))}
