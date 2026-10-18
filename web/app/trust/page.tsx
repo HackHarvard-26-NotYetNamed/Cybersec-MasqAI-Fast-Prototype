@@ -11,12 +11,7 @@ export const metadata: Metadata = {
 export default function TrustPage() {
   return (
     <div className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6 sm:py-10">
-      <PageIntro eyebrow="Protecting the key" title="Key Enigma and honeytokens">
-        The sanitizer protects what you send. These two features protect the key you send it with. Both are stretch
-        goals: while <code className="font-mono text-foreground">keys.json</code> says{" "}
-        <code className="font-mono text-foreground">&quot;status&quot;: &quot;planned&quot;</code>, this page is a design
-        preview.
-      </PageIntro>
+      <PageIntro eyebrow="Protecting the key" title="Key Enigma and honeytokens" />
 
       <div className="grid gap-4 md:grid-cols-2">
         <article className="rounded-xl border bg-card p-5">
@@ -24,22 +19,16 @@ export default function TrustPage() {
             <KeyRound aria-hidden className="size-5 text-ent-key" />
             Key Enigma
           </h2>
-          <p className="mt-2 text-pretty text-muted-foreground">
-            The gateway holds the provider credentials and keeps issuing short-lived upstream keys. Each key is active for a
-            few minutes, stays valid for a short grace period so in-flight requests finish, then is revoked. A key that
-            leaks stops working soon after.
-          </p>
+          <p className="mt-2 text-lg text-pretty text-muted-foreground">A fresh key every 15 minutes: a leaked one dies fast.</p>
+          <p className="mt-2 inline-flex rounded-full border px-2.5 py-0.5 font-mono text-xs">In progress · key leases done</p>
         </article>
         <article className="rounded-xl border bg-card p-5">
           <h2 className="flex items-center gap-2 text-lg font-semibold">
             <Radar aria-hidden className="size-5 text-leak" />
             Honeytokens
           </h2>
-          <p className="mt-2 text-pretty text-muted-foreground">
-            MasqAI plants a canary key in outgoing context. Nothing legitimate ever uses it. If it is ever used, the
-            untrusted model’s operator was logging and reusing your traffic, and MasqAI marks that endpoint
-            untrustworthy.
-          </p>
+          <p className="mt-2 text-lg text-pretty text-muted-foreground">A planted canary key: if it&apos;s ever used, the endpoint is logging you.</p>
+          <p className="mt-2 inline-flex rounded-full border px-2.5 py-0.5 font-mono text-xs">Planned</p>
         </article>
       </div>
 

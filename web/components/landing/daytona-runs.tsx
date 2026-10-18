@@ -101,7 +101,7 @@ function Tile({ state, title }: { state: "waiting" | "running" | "leaked" | "cle
   );
 }
 
-function Containment() {
+export function Containment() {
   const reduce = useReducedMotion();
   return (
     <figure

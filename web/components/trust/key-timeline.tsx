@@ -25,7 +25,7 @@ function KeyTrustBody({ data }: { data: Keys }) {
           <span className="rounded-full bg-foreground px-2.5 py-0.5 font-mono text-sm font-bold text-background">Planned</span>
           <FlaskConical aria-hidden className="size-5 shrink-0" />
           <span className="font-medium">
-            Design preview. Key Enigma and honeytokens are stretch goals; this timeline is simulated.
+            Simulated timeline: what Key Enigma and honeytokens will look like.
           </span>
         </p>
       ) : null}
