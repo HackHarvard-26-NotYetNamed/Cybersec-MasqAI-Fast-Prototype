@@ -73,6 +73,21 @@ charger / power bank --USB (power only)--> ESP32 USB port
 
 The board checks the key, the workspace and its budget with OpenRouter before it stores anything.
 
+## Persistent LAN mode
+
+`lan_app.py` is an alternate entry point for an OTA-installed board when a USB-TTL adapter is unavailable. It serves
+the same authenticated protocol on TCP port 7777, uses the real `openrouter.ai` endpoint and `/enigma/ca.der`, feeds
+the hardware watchdog, and keeps the OTA launcher available. Limit access to port 7777 to a trusted LAN. The
+protocol authenticates paired hosts and encrypts secret payloads, but this deployment is not an HTTPS transport and
+does not provide TLS-level metadata protection.
+
+Upload `lan_app.py` as `/app.py` using the authenticated OTA tool. To open the 120-second first-pairing window, create
+`/enigma/lan_enroll` over OTA and reboot. Compare the six-digit code shown in the device log/display with the host CLI before
+answering yes. The marker is consumed on boot, and a provisioned board does not accept another enrollment unless an
+owner deliberately opens a new window. Configure the gateway and device CLI with `tcp://<board-ip>:7777` and retain
+the generated pairing file as a host secret. The gateway holds the pairing secret only in memory while running and
+re-authenticates after device or network reconnects.
+
 ## Bench (no USB-TTL adapter)
 
 These tools are **bench only**. They are not part of the production firmware, and only FAKE keys go through them.

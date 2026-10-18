@@ -230,8 +230,7 @@ class UartLink:
 
 
 class TcpLink:
-    """BENCH ONLY: the same frames over one TCP connection at a time. Not used by firmware/esp32/main.py (§13.2 rules
-    out a radio path between host and device in production)."""
+    """LAN link: one authenticated protocol connection at a time over the device Wi-Fi network."""
 
     def __init__(self, port=7777):
         self.srv = socket.socket()
@@ -241,6 +240,7 @@ class TcpLink:
         self.srv.settimeout(0.2)
         self.conn = None
         self.buf = b""
+        self.closed_event = False
 
     def readline(self):
         if self.conn is None:
@@ -254,7 +254,7 @@ class TcpLink:
             chunk = self.conn.recv(1024)
             if not chunk:
                 self._drop()
-                return b""
+                return b"CLOSED"
             self.buf += chunk
         except OSError:
             pass   # timeout: nothing new
@@ -268,12 +268,15 @@ class TcpLink:
         return line
 
     def _drop(self):
+        was_connected = self.conn is not None
         try:
             self.conn.close()
         except Exception:
             pass
         self.conn = None
         self.buf = b""
+        if was_connected:
+            self.closed_event = True
 
     def write(self, data):
         if self.conn is not None:
@@ -281,6 +284,13 @@ class TcpLink:
                 self.conn.sendall(data) if hasattr(self.conn, "sendall") else self.conn.write(data)
             except OSError:
                 self._drop()
+
+    def close(self):
+        self._drop()
+        try:
+            self.srv.close()
+        except Exception:
+            pass
 
 
 def serve(device, link, board, idle=None):
@@ -296,6 +306,10 @@ def serve(device, link, board, idle=None):
             link.write(plain_error(None, "BAD_FRAME", "line too long"))
             continue
         if not line:
+            if getattr(link, "closed_event", False):
+                link.closed_event = False
+                device.lock()
+                device.session = None
             if idle is not None:
                 idle()
             continue

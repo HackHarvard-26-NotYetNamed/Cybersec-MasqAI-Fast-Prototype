@@ -185,9 +185,16 @@ async def security_chat(request: Request) -> dict:
 
 
 def main() -> None:
-    threading.Thread(target=lambda: uvicorn.run(security, host="127.0.0.1", port=8797, log_level="warning"), daemon=True).start()
-    print("fake agent model: http://127.0.0.1:8796   fake security model: http://127.0.0.1:8797  (self-test only)")
-    uvicorn.run(agent, host="127.0.0.1", port=8796, log_level="warning")
+    import argparse
+    parser = argparse.ArgumentParser(description="self-test doubles")
+    parser.add_argument("--agent-port", type=int, default=8796)
+    parser.add_argument("--security-port", type=int, default=8797)
+    args = parser.parse_args()
+    threading.Thread(target=lambda: uvicorn.run(security, host="127.0.0.1", port=args.security_port, log_level="warning"),
+                     daemon=True).start()
+    print(f"fake agent model: http://127.0.0.1:{args.agent_port}   fake security model: "
+          f"http://127.0.0.1:{args.security_port}  (self-test only)", flush=True)
+    uvicorn.run(agent, host="127.0.0.1", port=args.agent_port, log_level="warning")
 
 
 if __name__ == "__main__":

@@ -23,8 +23,8 @@ of scope. The harness closes that gap:
 | [`sandbox.py`](sandbox.py) `DaytonaSandbox.upload` | `sandbox.fs.upload_files([FileUpload(...)])` | Uploads the case workspace with that run's canaries, plus `seed.sh` (and later `check.sh`) outside the workspace |
 | [`sandbox.py`](sandbox.py) `DaytonaSandbox.exec` | `sandbox.process.exec(cmd, cwd, env, timeout)` | Runs seed.sh, **every bash command the agent's model asks for** (120 s cap each), and check.sh |
 | [`sandbox.py`](sandbox.py) `DaytonaSandbox.delete`, `DaytonaBackend.cleanup` | `sandbox.delete()`, `AsyncDaytona().list(ListSandboxesQuery(labels=...))` + `delete` | Every sandbox is deleted in `finally`; after Ctrl-C a label sweep deletes any leftovers |
-| [`run_eval.py`](run_eval.py) `one_run`, `main_async` | (through `sandbox.py`) | Sandbox per run, concurrency capped by a semaphore (default 8), SIGINT/SIGTERM cancel cleanly |
-| [`smoke.py`](smoke.py) | (through `sandbox.py`) | One case, one run per condition, pass/fail in under 3 minutes |
+| [`run_eval.py`](run_eval.py) `one_run`, `Campaign.run` | (through `sandbox.py`) | Sandbox per run, concurrency capped by a semaphore, cancel cleans up |
+| [`smoke.py`](smoke.py) | (through `run_eval.py`) | One case, one run per condition, pass/fail in under 3 minutes |
 | [`daytona_check.py`](daytona_check.py) | (through `sandbox.py`) | Proves the properties above on one real sandbox: isolation, tools, **network blocked**, upload, deletion and sweep. A live demo |
 
 ### Verified on real Daytona
@@ -53,20 +53,21 @@ it refuses to start otherwise, so a real model's commands never run on the lapto
 ## Architecture
 
 ```
-run_eval.py (laptop)
-  ├─ creates a Daytona sandbox per run
+run_eval.py (laptop)  ← eval/gui.py drives the same Campaign from the browser
+  ├─ starts relay + one gateway per masqai condition (services.py), stops them at the end
+  ├─ creates a sandbox per run
   ├─ seeds it: case workspace + per-run canaries (files, env, git history)
-  ├─ agent loop (laptop): OpenAI Chat Completions with one `bash` tool, model "eval/<run_id>"
-  │     condition raw:    http://127.0.0.1:8788/v1  (the relay)
-  │     condition masqai: http://127.0.0.1:8787/v1  (MasqAI → relay)
+  ├─ agent loop (laptop): OpenAI Chat Completions with one `bash` tool, model "eval/<run_id>/<untrusted>"
+  │     raw condition:    http://127.0.0.1:8788/v1  (the relay)
+  │     masqai condition: http://127.0.0.1:880N/v1  (that condition's MasqAI → relay)
   │     tool "bash" → sandbox.process.exec(cmd) → output returned as the tool result
   ├─ task check: the case's check.sh in the sandbox (uploaded only after the agent finishes)
   └─ leak check: the relay's request log for this run, scanned for this run's canaries
 relay (playground/relay.py, :8788) = the untrusted endpoint: logs every request body in RAM, forwards
-  "eval/<run_id>" requests as the one fixed --eval-model, and records token usage
+  "eval/<run_id>/<model>" requests as <model> (or the fixed --eval-model) and records token usage
 ```
 
-Runs are tagged through the model name `eval/<run_id>`, which MasqAI forwards unchanged (it strips
+Runs are tagged through the model name, which MasqAI forwards unchanged (it strips
 `x-masqai-*` headers, so a header tag wouldn't survive). Requests also carry `x-masqai-session: <run_id>`
 so MasqAI never mixes two runs' sessions.
 
@@ -91,43 +92,90 @@ for keys only, any 12-character or longer piece of its random part.
 
 ## Running it
 
-```bash
+### One click: the Eval GUI
+
+```powershell
 pip install -r requirements.txt -r eval/requirements.txt
-ollama run nemotron-3.5-lightning:30b         # the security model (local)
-# Ollama's default 4096-token window is too small: a full window drops the instructions (--context-shift).
-printf 'FROM qwen2.5:7b\nPARAMETER num_ctx 16384\n' > Modelfile && ollama create qwen2.5:7b-16k -f Modelfile
-
-# terminal 1: the untrusted endpoint
-export OPENROUTER_API_KEY=sk-or-v1-...       # only the relay holds the upstream key
-RELAY_MAX_RECORDS=5000 python playground/relay.py --eval-model google/gemini-3.8-flash
-
-# terminal 2: MasqAI on the eval config
-python run_gateway.py --config eval/masqai.eval.json
-
-# terminal 3: the harness
-export DAYTONA_API_KEY=...
-python -m eval.smoke                                                  # < 3 min, pass/fail
-python -m eval.smoke --stream                                         # the same, streaming like real agents
-python -m eval.run_eval --cases all --conditions raw,masqai --runs 10 --concurrency 8 \
-       --security-model nemotron-3.5-lightning:30b \
-       --untrusted-model google/gemini-3.8-flash
-python -m eval.run_eval --injection --runs 20                         # optional: tests/injection
-python -m eval.aggregate eval/out/runs.jsonl > web/public/data/results.json
+.\run_eval.ps1                 # = python -m eval.gui   → opens http://127.0.0.1:8790/#token=…
 ```
 
-`--stream` makes the agent stream (SSE) like OpenCode and Claude Code, which exercises MasqAI's streaming
-restore and its held-back tool-call inspection; it is recorded in meta.json. `--untrusted-model` must name what the relay forwards to (`--eval-model`); it's recorded in
-`results.json`. Agent caps: 12 turns, 120 s per command, 15 min per run. Final numbers use `--runs 20`.
+Pick a preset (or edit everything), press **Start**. The campaign starts and stops its own services:
+the relay, **one MasqAI gateway per masqai condition** (ports 8801, 8802, …) and, for a self-test, the
+fake models. Progress streams live into a case × condition matrix (one dot per run; hover for details,
+click for the full row), a results table with deltas against the raw baseline, and the log. Stop
+cancels cleanly (sandboxes deleted). Every campaign is kept in history: open it again, reuse its config,
+read `report.md`, view each service's log, or **publish** it to `web/public/data/results.json`.
 
-## Outputs (`eval/out/`, git-ignored)
+Configurable from the GUI (and in the run config JSON):
 
-- `runs.jsonl`: one row per run, **append-only**. Clear it before a new campaign. Rows hold canary
-  **type names** and counts, never values:
-  `{"run_id", "case", "condition", "task_ok", "leaked": ["DB_PATH"], "leaked_count", "canary_count",
-  "relay_requests", "blocked", "block_status", "tool_calls_blocked", "rate_limited", "prompt_tokens", "completion_tokens", "wall_ms", "llm_ms_p50"}`
-- `meta.json`: models, agent, sandbox provider, runs per case.
-- `injection.json`: from `--injection`.
-- `report.md`: a table per case, plus the 3 worst `masqai` runs with leaked canary types.
+| Group | Settings |
+|---|---|
+| Campaign | name, cases, runs per case × condition, concurrency, sandbox (local / Daytona), self-test, stream, publish |
+| Conditions | any number of `raw(untrusted)` and `masqai(security, untrusted)`; enable/disable, duplicate, reorder |
+| Gateway (shared) | security providers (name, URL, key env), context mode, recent items, nearest ops, op context lines, auto mask, tool rejection, security timeout, context tokens, upstream timeout, remote security opt-in, pass unknown, host-id detection, max sessions; or the whole gateway JSON |
+| Limits | max turns, max tokens, temperature, 429 retries, command / run / LLM HTTP / seed / check / service-ready timeouts |
+| Relay & ports | relay port, upstream, upstream key env, max records, gateway base port |
+
+Checks run as you type (unknown provider, remote security model without opt-in, missing
+`OPENROUTER_API_KEY` / `DAYTONA_API_KEY`, port clashes, local sandbox warnings); Start stays disabled
+while there is an error. The GUI binds to 127.0.0.1, refuses other Host headers and needs the session
+token from its URL. On a phone-width window the three columns become tabs.
+
+### Conditions: several baselines in one campaign
+
+```json
+"conditions": [
+  {"id": "raw",      "kind": "raw",    "untrusted": "google/gemini-3.8-flash"},
+  {"id": "qwen4b",   "kind": "masqai", "untrusted": "google/gemini-3.8-flash",
+   "security": {"provider": "ollama-local", "model": "qwen3.5:4b", "think": false}},
+  {"id": "nemotron", "kind": "masqai", "untrusted": "google/gemini-3.8-flash",
+   "security": {"provider": "ollama-local", "model": "nemotron-3.5-lightning:30b"}}
+]
+```
+
+Every masqai condition runs the **same gateway config** (`"gateway"`); only the security provider,
+model and `think` differ. The harness owns the route to the relay and the port. One relay serves every
+condition: the agent sends the model name `eval/<run_id>/<untrusted>`, the relay tags the request with
+`<run_id>` and forwards it as `<untrusted>`, so conditions may even use different untrusted models.
+
+### Headless
+
+```powershell
+python -m eval.run_eval --config selftest                      # a preset in eval/presets/
+python -m eval.run_eval --config my-run.json --runs 5 --cases uc2-db-path,uc3-secret-roundtrip --publish
+python -m eval.smoke --config selftest --case uc2-db-path      # one run per condition, pass/fail
+.\run_eval_qwen.ps1 -WithRaw -Sandbox daytona                  # wrappers: raw + one masqai condition
+python -m eval.run_eval --injection --runs 20                  # optional: tests/injection
+```
+
+Presets: `selftest` (fake models, local sandbox, two masqai conditions), `local-security-models`
+(qwen3.5:4b vs nemotron on Ollama, Daytona), `remote-security-models` (an OpenRouter security model vs
+a local one). Save your own from the GUI.
+
+Before a real run: `ollama run <security model>` for local security models, `OPENROUTER_API_KEY` for
+the relay (only the relay holds the upstream key), `DAYTONA_API_KEY` for Daytona.
+Ollama's default 4096-token window is too small: a full window drops the instructions (--context-shift):
+
+```bash
+printf 'FROM qwen2.5:7b\nPARAMETER num_ctx 16384\n' > Modelfile && ollama create qwen2.5:7b-16k -f Modelfile
+```
+
+`stream` makes the agent stream (SSE) like OpenCode and Claude Code, which exercises MasqAI's streaming
+restore and its held-back tool-call inspection. OpenRouter limits new accounts to 20 requests per minute
+per model, so keep concurrency at 2 until that lifts. Final numbers use 20 runs.
+
+## Outputs (`eval/out/campaigns/<id>/`, git-ignored)
+
+- `config.json`: the exact run config. `meta.json`: conditions (with models), cases, sandbox, agent.
+- `runs.jsonl`: one row per run. Rows hold canary **type names** and counts, never values:
+  `{"run_id", "case", "condition", "kind", "untrusted", "security_model", "task_ok", "leaked": ["DB_PATH"],
+  "leaked_count", "canary_count", "relay_requests", "blocked", "block_status", "expected_block_met",
+  "tool_calls_blocked", "rate_limited", "prompt_tokens", "completion_tokens", "wall_ms", "llm_ms_p50", "turns", "error"}`
+- `results.json`: `conditions` plus, per case, `conditions: {<id>: metrics}`; `raw` / `masqai` are the
+  first condition of each kind (what the site shows). Publishing keeps only cases with both.
+- `report.md`: a table per case with a row per condition, plus the 3 worst masqai runs.
+- `logs/`: each service's output. `gateways/`: the generated gateway config of each masqai condition.
+- `eval/out/injection.json`: from `--injection`.
 
 A MasqAI fail-closed answer (502/422/404 with a `masqai_*` error) is `blocked: true`. It is **not** a
 leak and **is** a task failure; report.md counts blocks separately.
@@ -155,11 +203,7 @@ With them the whole pipeline runs locally in seconds. Its numbers are **not meas
 marks them `placeholder: true`, and the site watermarks them.
 
 ```bash
-python -m eval.fake_llm &
-RELAY_MAX_RECORDS=5000 python playground/relay.py --upstream http://127.0.0.1:8796 --key-env '' --eval-model fake-agent &
-python run_gateway.py --config eval/masqai.selftest.json &
-python -m eval.smoke --sandbox local --self-test
-python -m eval.run_eval --runs 3 --sandbox local --self-test
+python -m eval.run_eval --config selftest        # or pick "selftest" in the GUI and press Start
 ```
 
 ## Rules

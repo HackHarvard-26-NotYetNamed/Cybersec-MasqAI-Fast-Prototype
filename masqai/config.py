@@ -231,6 +231,11 @@ class SecurityModelConfig(BaseModel):
     tool_rejection: Literal["rewrite", "error"] = "rewrite"
     # Empty = the built-in prompt in masqai/prompts/security.md.
     system_prompt: str = ""
+    # Whether thinking / reasoning is enabled for the security model.
+    # None = default behavior of model/provider.
+    # False = disable thinking (e.g. reasoning_effort="none" or think=False).
+    # True = enable thinking.
+    think: bool | None = None
 
     @field_validator("provider", "model", mode="before")
     @classmethod

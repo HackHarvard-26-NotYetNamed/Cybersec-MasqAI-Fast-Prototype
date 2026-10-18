@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>MasqAI Eval</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#0f1115;--p:#171a21;--p2:#1e222b;--b:#2a2f3a;--t:#d9dde5;--m:#8a92a3;--a:#5aa9ff;--ok:#3fb97a;--bad:#e5534b;--warn:#d9a33b;--blk:#b07cf0;--r:6px}
+@media (prefers-color-scheme:light){:root{--bg:#f4f5f7;--p:#fff;--p2:#f0f2f5;--b:#d8dce3;--t:#1c2028;--m:#687083;--a:#1f6fd1}}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--t);font:13px/1.35 system-ui,-apple-system,Segoe UI,sans-serif}
+button,input,select,textarea{font:inherit;color:inherit}
+input,select,textarea{background:var(--p2);border:1px solid var(--b);border-radius:4px;padding:3px 6px;min-width:0;width:100%}
+input[type=checkbox]{width:auto}textarea{font:12px/1.4 ui-monospace,Consolas,monospace;resize:vertical}
+input:focus,select:focus,textarea:focus{outline:1px solid var(--a);border-color:var(--a)}
+button{background:var(--p2);border:1px solid var(--b);border-radius:4px;padding:3px 9px;cursor:pointer;white-space:nowrap}
+button:hover{border-color:var(--a)}button:disabled{opacity:.45;cursor:default}
+.pri{background:var(--a);border-color:var(--a);color:#fff;font-weight:600}.dng{background:var(--bad);border-color:var(--bad);color:#fff;font-weight:600}
+.ic{padding:1px 6px;background:none;border-color:transparent;color:var(--m)}.ic:hover{color:var(--t)}
+header{position:sticky;top:0;z-index:5;background:var(--p);border-bottom:1px solid var(--b);padding:6px 10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+header h1{font-size:14px;margin:0 6px 0 0;white-space:nowrap}header .grow{flex:1}
+header select{width:auto;max-width:240px}
+#go{min-width:92px;padding:5px 14px;font-size:14px}
+.pill{display:inline-block;padding:0 7px;border-radius:9px;font-size:11px;background:var(--p2);border:1px solid var(--b);white-space:nowrap}
+.pill.ok{color:var(--ok);border-color:var(--ok)}.pill.bad{color:var(--bad);border-color:var(--bad)}.pill.warn{color:var(--warn);border-color:var(--warn)}.pill.run{color:var(--a);border-color:var(--a)}
+#bar{height:3px;background:var(--b);position:sticky;top:0}#bar i{display:block;height:100%;width:0;background:var(--a);transition:width .3s}
+nav{display:none;gap:2px;padding:4px 6px;background:var(--p);border-bottom:1px solid var(--b);position:sticky;top:var(--hh,41px);z-index:4;overflow-x:auto}
+nav button{flex:1;border:none;background:none;padding:6px}nav button.on{color:var(--a);box-shadow:inset 0 -2px var(--a)}
+main{display:grid;grid-template-columns:minmax(330px,430px) minmax(300px,420px) 1fr;gap:8px;padding:8px;align-items:start}
+section.col{display:flex;flex-direction:column;gap:8px;min-width:0}
+.card{background:var(--p);border:1px solid var(--b);border-radius:var(--r);min-width:0}
+.card>h2{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--m);margin:0;padding:6px 8px;border-bottom:1px solid var(--b);display:flex;align-items:center;gap:6px}
+.card>h2 .grow{flex:1}.bd{padding:7px 8px}
+.g{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:5px 8px}
+.f{display:flex;flex-direction:column;gap:1px;min-width:0}.f>span{font-size:11px;color:var(--m);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chk{display:flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap}
+.chips{display:flex;flex-wrap:wrap;gap:4px}.chip{border-radius:12px;padding:2px 9px;font-size:12px}.chip.on{background:var(--a);border-color:var(--a);color:#fff}
+.cond{border:1px solid var(--b);border-radius:5px;padding:5px;margin-bottom:5px;display:grid;grid-template-columns:auto 1fr auto;gap:4px 6px;align-items:center}
+.cond.off{opacity:.5}.cond .row{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:4px 6px}
+.cond .row.r3{grid-template-columns:1.2fr 1.4fr .8fr}
+.tag{font-size:10px;font-weight:700;padding:1px 6px;border-radius:3px;text-transform:uppercase}.tag.raw{background:#7a4a10;color:#ffd9a0}.tag.masqai{background:#173d6e;color:#bcdcff}
+.lbl{font:11px ui-monospace,Consolas,monospace;color:var(--m);grid-column:1/-1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.probs{margin:0;padding:0;list-style:none;font-size:12px}.probs li{padding:2px 0;display:flex;gap:6px}.probs b{white-space:nowrap}
+.e{color:var(--bad)}.w{color:var(--warn)}.m{color:var(--m)}.s{font-size:11px}
+table{border-collapse:collapse;width:100%;font-size:12px}th,td{padding:3px 6px;border-bottom:1px solid var(--b);text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}th{color:var(--m);font-weight:500;font-size:11px;position:sticky;top:0;background:var(--p)}
+.tw{overflow:auto;max-height:420px}
+.mx td{text-align:left;vertical-align:top}.dots{display:flex;flex-wrap:wrap;gap:2px;min-width:40px}
+.d{width:11px;height:11px;border-radius:2px;background:var(--b);cursor:pointer}
+.d.ok{background:var(--ok)}.d.fail{background:#6b7280}.d.leak{background:var(--bad)}.d.blk{background:var(--blk)}.d.err{background:var(--warn)}.d.go{background:var(--a);animation:pl 1s infinite}
+@keyframes pl{50%{opacity:.35}}
+.legend{display:flex;gap:9px;flex-wrap:wrap;font-size:11px;color:var(--m);margin-top:5px}.legend span{display:flex;align-items:center;gap:3px}
+#log{font:11px/1.45 ui-monospace,Consolas,monospace;max-height:240px;overflow:auto;white-space:pre-wrap;word-break:break-word;margin:0}
+#log .warn{color:var(--warn)}#log .error{color:var(--bad)}
+.hist{display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid var(--b);font-size:12px}.hist .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.good{color:var(--ok)}.poor{color:var(--bad)}
+.prov{display:grid;grid-template-columns:1fr 1.6fr 1fr auto;gap:4px;margin-bottom:4px}
+details>summary{cursor:pointer;color:var(--m);font-size:12px;padding:3px 0}
+dialog{background:var(--p);color:var(--t);border:1px solid var(--b);border-radius:8px;max-width:min(720px,94vw);width:100%;padding:0}
+dialog pre{margin:0;padding:10px;max-height:70vh;overflow:auto;font:11px/1.4 ui-monospace,Consolas,monospace;white-space:pre-wrap}
+dialog header{position:static}
+.hide{display:none!important}
+@media (max-width:1180px){main{grid-template-columns:minmax(320px,1fr) minmax(300px,1fr)}section.col[data-tab=out]{grid-column:1/-1}}
+@media (max-width:760px){
+ nav{display:flex}main{grid-template-columns:1fr;padding:6px}section.col{display:none}section.col.on{display:flex}
+ header{padding:6px}header h1{display:none}#preset{max-width:42vw}#summary{display:none}
+ .g{grid-template-columns:repeat(2,1fr)}input,select{padding:6px;font-size:15px}button{padding:6px 10px;min-height:34px}.ic,.chip{min-height:32px}
+ input[type=checkbox]{width:20px;height:20px}.chk{min-height:30px}.cond .row.r3{grid-template-columns:1fr 1fr}
+ .d{width:14px;height:14px}.prov{grid-template-columns:1fr 1fr}.prov input[data-f=base_url]{grid-column:1/-1;order:3}
+}
+</style></head><body>
+<header>
+ <h1>MasqAI Eval</h1>
+ <select id="preset" title="preset"></select>
+ <button class="ic" id="savePreset" title="save as preset">Save</button>
+ <span class="grow"></span>
+ <span id="summary" class="m s"></span>
+ <span id="state" class="pill">idle</span>
+ <button id="go" class="pri">Start</button>
+</header>
+<div id="bar"><i></i></div>
+<nav><button data-t="setup" class="on">Setup</button><button data-t="gw">Gateway</button><button data-t="out">Run</button></nav>
+<main>
+<section class="col on" data-tab="setup">
+ <div class="card"><h2>Campaign<span class="grow"></span><span id="jobs" class="m"></span></h2><div class="bd">
+  <div class="g">
+   <label class="f"><span>Name</span><input data-k="name"></label>
+   <label class="f"><span>Runs / case / cond.</span><input data-k="runs" type="number" min="1"></label>
+   <label class="f"><span>Concurrency</span><input data-k="concurrency" type="number" min="1"></label>
+   <label class="f"><span>Sandbox</span><select data-k="sandbox"><option value="local">local</option><option value="daytona">daytona</option></select></label>
+  </div>
+  <div class="chips" style="margin-top:6px">
+   <label class="chk"><input type="checkbox" data-k="self_test">self-test (fake models)</label>
+   <label class="chk"><input type="checkbox" data-k="allow_local_untrusted">allow local untrusted cmds</label>
+   <label class="chk"><input type="checkbox" data-k="agent.stream">stream (SSE)</label>
+   <label class="chk"><input type="checkbox" data-k="publish">publish to site</label>
+  </div>
+ </div></div>
+ <div class="card"><h2>Cases<span class="grow"></span><button class="ic" id="allCases">all</button><button class="ic" id="noCases">none</button></h2>
+  <div class="bd"><div class="chips" id="cases"></div></div></div>
+ <div class="card"><h2>Conditions<span class="grow"></span><button class="ic" id="addRaw">+ raw</button><button class="ic" id="addMasq">+ masqai</button></h2>
+  <div class="bd" id="conds"></div></div>
+ <div class="card"><h2>Limits &amp; timeouts</h2><div class="bd"><div class="g">
+  <label class="f"><span>Max turns</span><input data-k="agent.max_turns" type="number" min="1"></label>
+  <label class="f"><span>Max tokens / call</span><input data-k="agent.max_tokens" type="number" min="16"></label>
+  <label class="f"><span>Temperature</span><input data-k="agent.temperature" type="number" step="0.1" min="0" max="2"></label>
+  <label class="f"><span>429 retries</span><input data-k="agent.rate_limit_retries" type="number" min="0"></label>
+  <label class="f"><span>Command timeout s</span><input data-k="agent.command_timeout_s" type="number" min="1"></label>
+  <label class="f"><span>Run timeout s</span><input data-k="agent.run_timeout_s" type="number" min="10"></label>
+  <label class="f"><span>LLM HTTP timeout s</span><input data-k="agent.http_timeout_s" type="number" min="1"></label>
+  <label class="f"><span>Seed timeout s</span><input data-k="harness.seed_timeout_s" type="number" min="1"></label>
+  <label class="f"><span>Check timeout s</span><input data-k="harness.check_timeout_s" type="number" min="1"></label>
+  <label class="f"><span>Service ready s</span><input data-k="services.ready_timeout_s" type="number" min="1"></label>
+ </div></div></div>
+</section>
+
+<section class="col" data-tab="gw">
+ <div class="card"><h2>Gateway (shared by every masqai condition)</h2><div class="bd">
+  <div class="m s" style="margin-bottom:5px">Each masqai condition runs its own gateway from this config; only the security provider / model / think differ. The route to the relay is set by the harness.</div>
+  <div class="s m" style="margin:2px 0">Security providers</div>
+  <div id="provs"></div><button class="ic" id="addProv">+ provider</button>
+  <div class="g" style="margin-top:6px">
+   <label class="f"><span>Context mode</span><select data-k="gateway.security.context_mode"><option>recent</option><option>full</option></select></label>
+   <label class="f"><span>Recent items</span><input data-k="gateway.security.recent_items" type="number" min="0"></label>
+   <label class="f"><span>Nearest ops (-1 all)</span><input data-k="gateway.security.nearest_ops" type="number" min="-1"></label>
+   <label class="f"><span>Op context lines</span><input data-k="gateway.security.op_context_lines" type="number" min="0"></label>
+   <label class="f"><span>Auto mask</span><select data-k="gateway.security.auto_mask"><option>auto_veto</option><option>auto</option></select></label>
+   <label class="f"><span>Tool rejection</span><select data-k="gateway.security.tool_rejection"><option>rewrite</option><option>error</option></select></label>
+   <label class="f"><span>Security timeout s</span><input data-k="gateway.security.timeout_s" type="number" min="1"></label>
+   <label class="f"><span>Context tokens (0=?)</span><input data-k="gateway.security.context_tokens" type="number" min="0"></label>
+   <label class="f"><span>Upstream timeout s</span><input data-k="gateway.upstream_timeout_seconds" type="number" min="1"></label>
+   <label class="f"><span>Max sessions</span><input data-k="gateway.retention.max_sessions" type="number" min="1"></label>
+  </div>
+  <div class="chips" style="margin-top:6px">
+   <label class="chk"><input type="checkbox" data-k="gateway.security.allow_remote_security_model">allow remote security model</label>
+   <label class="chk"><input type="checkbox" data-k="gateway.pass_unknown">pass unknown content</label>
+   <label class="chk"><input type="checkbox" data-k="gateway.detectors.detect_host_identifiers">detect host ids</label>
+  </div>
+ </div></div>
+ <div class="card"><h2>Relay &amp; ports</h2><div class="bd"><div class="g">
+  <label class="f"><span>Relay port</span><input data-k="relay.port" type="number"></label>
+  <label class="f" style="grid-column:span 2"><span>Upstream</span><input data-k="relay.upstream"></label>
+  <label class="f"><span>Upstream key env</span><input data-k="relay.key_env"></label>
+  <label class="f"><span>Gateway base port</span><input data-k="services.gateway_base_port" type="number"></label>
+  <label class="f"><span>Relay max records</span><input data-k="relay.max_records" type="number"></label>
+ </div><div class="m s" id="envs" style="margin-top:6px"></div></div></div>
+ <div class="card"><h2>Full config JSON<span class="grow"></span><button class="ic" id="applyJson">apply</button><button class="ic" id="copyJson">copy</button></h2>
+  <div class="bd"><textarea id="json" rows="14" spellcheck="false"></textarea><div id="jsonErr" class="e s"></div></div></div>
+</section>
+
+<section class="col" data-tab="out">
+ <div class="card"><h2>Checks<span class="grow"></span><span id="checkState" class="m"></span></h2><div class="bd"><ul class="probs" id="probs"></ul></div></div>
+ <div class="card"><h2>Matrix<span class="grow"></span><span id="mxInfo" class="m"></span></h2><div class="bd">
+  <div class="tw"><table class="mx" id="matrix"></table></div>
+  <div class="legend"><span><i class="d ok"></i>ok</span><span><i class="d fail"></i>task fail</span><span><i class="d leak"></i>leak</span><span><i class="d blk"></i>blocked</span><span><i class="d err"></i>error</span><span><i class="d go"></i>running</span></div>
+ </div></div>
+ <div class="card"><h2>Results<span class="grow"></span><button class="ic" id="pubBtn" disabled>publish</button><button class="ic" id="repBtn" disabled>report</button></h2>
+  <div class="bd"><div class="tw" id="results"><span class="m">No results yet.</span></div></div></div>
+ <div class="card"><h2>Log<span class="grow"></span><select id="logSel" class="ic" style="width:auto"></select><button class="ic" id="clrLog">clear</button></h2>
+  <div class="bd"><pre id="log"></pre></div></div>
+ <div class="card"><h2>History<span class="grow"></span><button class="ic" id="refresh">refresh</button></h2><div class="bd" id="hist"></div></div>
+</section>
+</main>
+<dialog id="dlg"><header><b id="dlgT"></b><span class="grow" style="flex:1"></span><button class="ic" onclick="dlg.close()">close</button></header><pre id="dlgB"></pre></dialog>
+
+<script>
+const TOKEN=(location.hash.match(/token=([^&]+)/)||[])[1]||sessionStorage.getItem('evtok')||'';
+if(TOKEN) sessionStorage.setItem('evtok',TOKEN);
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const pct=x=>x==null?'–':Math.round(x*100)+'%';
+async function api(path,body){
+  const r=await fetch(path,{method:body===undefined?'GET':'POST',headers:{'x-eval-token':TOKEN,'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok){const e=new Error(typeof d.detail==='string'?d.detail:(d.error||('HTTP '+r.status)));e.data=d.detail;throw e}
+  return d;
+}
+let S={presets:{},cases:[],env:{}}, cfg=null, live={id:null,rows:{},plan:null,running:{},results:null,status:'idle'}, checkT=0;
+const DEF={name:'eval',cases:'all',runs:3,concurrency:2,sandbox:'local',self_test:false,allow_local_untrusted:false,publish:false,conditions:[],gateway:{providers:[],security:{},detectors:{},retention:{}},
+ agent:{max_turns:12,command_timeout_s:120,run_timeout_s:900,max_tokens:2048,temperature:0,rate_limit_retries:8,http_timeout_s:300,stream:false},
+ harness:{seed_timeout_s:120,check_timeout_s:60},relay:{port:8788,upstream:'https://openrouter.ai/api',key_env:'OPENROUTER_API_KEY',max_records:5000},services:{gateway_base_port:8801,ready_timeout_s:60,fake_llm_ports:[8796,8797]}};
+function merge(a,b){const o=structuredClone(a);for(const[k,v]of Object.entries(b||{}))o[k]=(v&&typeof v==='object'&&!Array.isArray(v)&&o[k]&&typeof o[k]==='object'&&!Array.isArray(o[k]))?merge(o[k],v):structuredClone(v);return o}
+const get=(o,p)=>p.split('.').reduce((x,k)=>x==null?x:x[k],o);
+function set(o,p,v){const ks=p.split('.');let x=o;for(const k of ks.slice(0,-1)){x[k]??={};x=x[k]}x[ks.at(-1)]=v}
+
+// ---------- config form ----------
+function bindAll(){
+  for(const el of $$('[data-k]')){
+    const v=get(cfg,el.dataset.k);
+    if(el.type==='checkbox') el.checked=!!v; else el.value=v??'';
+  }
+  renderCases();renderConds();renderProvs();syncJson();
+}
+document.addEventListener('input',e=>{
+  const el=e.target;if(!el.dataset||!el.dataset.k)return;
+  let v=el.type==='checkbox'?el.checked:el.value;
+  if(el.type==='number') v=v===''?null:Number(v);
+  set(cfg,el.dataset.k,v);
+  if(el.dataset.k==='self_test'&&v){cfg.sandbox='local';$('[data-k=sandbox]').value='local'}
+  changed();
+});
+function changed(){localStorage.setItem('evcfg',JSON.stringify(cfg));syncJson();clearTimeout(checkT);checkT=setTimeout(check,350)}
+function syncJson(){if(document.activeElement!==$('#json')) $('#json').value=JSON.stringify(cfg,null,2)}
+$('#applyJson').onclick=()=>{try{cfg=merge(DEF,JSON.parse($('#json').value));$('#jsonErr').textContent='';bindAll();changed()}catch(e){$('#jsonErr').textContent=e.message}};
+$('#copyJson').onclick=()=>navigator.clipboard?.writeText(JSON.stringify(cfg,null,2));
+
+function selCases(){return cfg.cases==='all'?S.cases.map(c=>c.id):cfg.cases}
+function renderCases(){
+  const on=new Set(selCases());
+  $('#cases').innerHTML=S.cases.map(c=>`<button class="chip${on.has(c.id)?' on':''}" data-c="${c.id}" title="${esc(c.title)}">${esc(c.id.replace(/^uc(\d+)-/,'UC$1 '))}${c.expected?` <span class="s">⇢${c.expected}</span>`:''}</button>`).join('');
+}
+$('#cases').onclick=e=>{const b=e.target.closest('[data-c]');if(!b)return;const s=new Set(selCases());s.has(b.dataset.c)?s.delete(b.dataset.c):s.add(b.dataset.c);
+  const ids=S.cases.map(c=>c.id).filter(i=>s.has(i));cfg.cases=ids.length===S.cases.length?'all':ids;renderCases();changed()};
+$('#allCases').onclick=()=>{cfg.cases='all';renderCases();changed()};
+$('#noCases').onclick=()=>{cfg.cases=[];renderCases();changed()};
+
+const provNames=()=>(cfg.gateway.providers||[]).map(p=>p.name).filter(Boolean);
+function label(c){return c.kind==='raw'?`raw(${c.untrusted})`:`masqai(${c.security?.model||'?'}, ${c.untrusted})`}
+function renderConds(){
+  const names=provNames();
+  $('#conds').innerHTML=cfg.conditions.map((c,i)=>`<div class="cond${c.enabled===false?' off':''}" data-i="${i}">
+   <input type="checkbox" data-f="enabled" ${c.enabled!==false?'checked':''} title="enabled">
+   <div style="display:flex;gap:5px;align-items:center;min-width:0"><span class="tag ${c.kind}">${c.kind}</span><input data-f="id" value="${esc(c.id)}" style="max-width:130px" title="condition id"></div>
+   <span><button class="ic" data-a="up" title="move up">↑</button><button class="ic" data-a="dup" title="duplicate">⧉</button><button class="ic" data-a="del" title="remove">✕</button></span>
+   <div class="row${c.kind==='masqai'?' r3':''}">
+    <label class="f"><span>Untrusted model</span><input data-f="untrusted" value="${esc(c.untrusted)}" list="untrustedList"></label>
+    ${c.kind==='masqai'?`<label class="f"><span>Security model</span><input data-f="security.model" value="${esc(c.security?.model)}"></label>
+    <label class="f"><span>Think</span><select data-f="security.think">${[['','config'],['false','off'],['true','on']].map(([v,t])=>`<option value="${v}"${String(c.security?.think??'')===v?' selected':''}>${t}</option>`).join('')}</select></label>
+    <label class="f" style="grid-column:1/-1"><span>Security provider</span><select data-f="security.provider">${names.map(n=>`<option${n===c.security?.provider?' selected':''}>${esc(n)}</option>`).join('')}${names.includes(c.security?.provider)?'':`<option selected>${esc(c.security?.provider||'')}</option>`}</select></label>`:''}
+   </div><div class="lbl">${esc(label(c))}</div></div>`).join('')+
+   `<datalist id="untrustedList">${[...new Set(cfg.conditions.map(c=>c.untrusted))].map(u=>`<option value="${esc(u)}">`).join('')}</datalist>`;
+}
+$('#conds').addEventListener('input',e=>{
+  const box=e.target.closest('[data-i]'),f=e.target.dataset.f;if(!box||!f)return;
+  const c=cfg.conditions[+box.dataset.i];let v=e.target.type==='checkbox'?e.target.checked:e.target.value;
+  if(f==='security.think') v=v===''?null:v==='true';
+  set(c,f,v);box.querySelector('.lbl').textContent=label(c);
+  if(f==='enabled') box.classList.toggle('off',!v);
+  changed();
+});
+$('#conds').onclick=e=>{
+  const a=e.target.dataset.a;if(!a)return;const i=+e.target.closest('[data-i]').dataset.i,L=cfg.conditions;
+  if(a==='del') L.splice(i,1);
+  if(a==='up'&&i>0) [L[i-1],L[i]]=[L[i],L[i-1]];
+  if(a==='dup'){const c=structuredClone(L[i]);c.id=uniq(c.id);L.splice(i+1,0,c)}
+  renderConds();changed();
+};
+function uniq(base){base=base.replace(/-\d+$/,'');let n=2,id=base;const ids=new Set(cfg.conditions.map(c=>c.id));while(ids.has(id))id=`${base}-${n++}`;return id}
+const lastUntrusted=()=>cfg.conditions.at(-1)?.untrusted||'google/gemini-3.8-flash';
+$('#addRaw').onclick=()=>{cfg.conditions.push({id:uniq('raw'),kind:'raw',untrusted:lastUntrusted(),enabled:true});renderConds();changed()};
+$('#addMasq').onclick=()=>{const p=provNames()[0]||'';cfg.conditions.push({id:uniq('masq'),kind:'masqai',untrusted:lastUntrusted(),enabled:true,security:{provider:p,model:'',think:null}});renderConds();changed()};
+
+function renderProvs(){
+  $('#provs').innerHTML=(cfg.gateway.providers||[]).map((p,i)=>`<div class="prov" data-p="${i}">
+   <input data-f="name" value="${esc(p.name)}" placeholder="name"><input data-f="base_url" value="${esc(p.base_url)}" placeholder="http://127.0.0.1:11434">
+   <input data-f="api_key_env" value="${esc(p.api_key_env||'')}" placeholder="key env (opt.)"><button class="ic" data-a="del">✕</button></div>`).join('')||'<div class="m s">none</div>';
+}
+$('#provs').addEventListener('input',e=>{const r=e.target.closest('[data-p]');if(!r)return;const p=cfg.gateway.providers[+r.dataset.p];const f=e.target.dataset.f;
+  const old=p.name;p[f]=e.target.value||(f==='api_key_env'?undefined:'');p.format??='openai';
+  if(f==='name') cfg.conditions.forEach(c=>{if(c.security?.provider===old)c.security.provider=p.name});
+  if(f==='name') renderConds();changed()});
+$('#provs').onclick=e=>{if(e.target.dataset.a!=='del')return;cfg.gateway.providers.splice(+e.target.closest('[data-p]').dataset.p,1);renderProvs();renderConds();changed()};
+$('#addProv').onclick=()=>{(cfg.gateway.providers??=[]).push({name:'provider'+(cfg.gateway.providers.length+1),base_url:'http://127.0.0.1:11434',format:'openai'});renderProvs();renderConds();changed()};
+
+// ---------- presets ----------
+function renderPresets(sel){
+  $('#preset').innerHTML='<option value="">— preset —</option>'+Object.keys(S.presets).map(n=>`<option${n===sel?' selected':''}>${esc(n)}</option>`).join('');
+}
+$('#preset').onchange=e=>{const p=S.presets[e.target.value];if(!p)return;cfg=merge(DEF,p);bindAll();changed()};
+$('#savePreset').onclick=async()=>{const name=prompt('Preset name',cfg.name);if(!name)return;
+  try{await api('/api/presets/'+encodeURIComponent(name),{config:cfg});await loadState();renderPresets(name)}catch(e){alert(e.message+(e.data?.problems?'\n'+e.data.problems.map(p=>p.where+': '+p.msg).join('\n'):''))}};
+
+// ---------- checks ----------
+async function check(){
+  $('#checkState').textContent='checking…';
+  try{
+    const r=await api('/api/check',{config:cfg});
+    const P=r.problems||[];
+    $('#probs').innerHTML=P.length?P.map(p=>`<li class="${p.level==='error'?'e':'w'}"><b>${p.level==='error'?'✕':'!'} ${esc(p.where)}</b><span>${esc(p.msg)}</span></li>`).join(''):'<li class="good">✓ ready</li>';
+    $('#checkState').textContent=r.ok?'ok':'blocked';
+    $('#jobs').textContent=r.jobs!=null?`${r.jobs} runs`:'';
+    S.canStart=r.ok;
+  }catch(e){$('#probs').innerHTML=`<li class="e">${esc(e.message)}</li>`;S.canStart=false}
+  paintHeader();
+}
+
+// ---------- run ----------
+$('#go').onclick=async()=>{
+  if(live.status==='running'||live.status==='starting'){ if(!confirm('Stop the running campaign? Sandboxes are cleaned up.'))return; $('#go').disabled=true; try{await api('/api/stop',{})}finally{$('#go').disabled=false} return }
+  try{ live={id:null,rows:{},plan:null,running:{},results:null,status:'starting'}; $('#log').textContent=''; paintAll(); showTab('out');
+    await api('/api/start',{config:cfg}); }
+  catch(e){ live.status='idle'; const P=e.data?.problems; log(P?P.map(p=>`${p.where}: ${p.msg}`).join('\n'):e.message,'error'); paintHeader() }
+};
+function log(msg,level='info'){const L=$('#log');const near=L.scrollHeight-L.scrollTop-L.clientHeight<30;const d=document.createElement('div');d.className=level;d.textContent=`${new Date().toLocaleTimeString()} ${msg}`;L.appendChild(d);if(near)L.scrollTop=L.scrollHeight}
+let es=null,lastSeq=0;
+function connect(since){
+  lastSeq=since;es?.close();es=new EventSource(`/api/events?token=${encodeURIComponent(TOKEN)}&since=${since}`);
+  es.onmessage=m=>{const ev=JSON.parse(m.data);if(ev.seq<lastSeq)return;lastSeq=ev.seq+1;onEvent(ev)};
+  es.onerror=()=>{es.close();setTimeout(()=>connect(lastSeq),1500)};
+}
+function onEvent(ev){
+  switch(ev.type){
+    case 'campaign': live={id:ev.id,rows:{},plan:null,running:{},results:null,status:'starting'}; break;
+    case 'plan': live.id=ev.id; live.plan=ev; break;
+    case 'status': live.status=ev.status; if(ev.error) log(ev.error,'error'); if(['finished','failed','cancelled'].includes(ev.status)){loadState();loadLogs()} break;
+    case 'run_start': live.running[ev.index]=ev; break;
+    case 'run': delete live.running[ev.index]; live.rows[ev.index]=ev.row; break;
+    case 'results': live.results=ev.results; break;
+    case 'log': log(ev.msg,ev.level); return;
+  }
+  paintAll();
+}
+function dotClass(r){if(!r)return'';if(r.error)return'err';if(r.leaked_count>0)return'leak';if(r.blocked)return r.expected_block_met?'blk ok':'blk';return r.task_ok?'ok':'fail'}
+function rowTip(r){return `${r.run_id}\ntask ${r.task_ok?'ok':'fail'} · leaked ${r.leaked.join(',')||'none'} · relay ${r.relay_requests} req\n${r.turns} turns · ${r.prompt_tokens} prompt tok · p50 ${r.llm_ms_p50??'–'} ms · ${Math.round(r.wall_ms/1000)} s`+(r.blocked?`\nblocked ${r.block_status}${r.expected_block_met?' (expected)':''}`:'')+(r.error?`\nerror: ${r.error}`:'')}
+function paintMatrix(){
+  const P=live.plan;if(!P){$('#matrix').innerHTML='<tr><td class="m">Start a campaign to see runs here.</td></tr>';$('#mxInfo').textContent='';return}
+  const cell={};for(const[i,r]of Object.entries(live.rows))(cell[r.case+'|'+r.condition]??=[]).push(r);
+  const run={};for(const e of Object.values(live.running))run[e.case+'|'+e.condition]=(run[e.case+'|'+e.condition]||0)+1;
+  const per=Math.round(P.total/(P.cases.length*P.conditions.length)||1);
+  $('#matrix').innerHTML=`<tr><th>case</th>${P.conditions.map(c=>`<th title="${esc(c.label)}"><span class="tag ${c.kind}">${esc(c.id)}</span></th>`).join('')}</tr>`+
+   P.cases.map(cs=>`<tr><td>${esc(cs.replace(/^uc(\d+)-/,'UC$1 '))}</td>${P.conditions.map(c=>{const k=cs+'|'+c.id,rs=cell[k]||[],n=run[k]||0;
+     return `<td><div class="dots">${rs.map(r=>`<i class="d ${dotClass(r)}" title="${esc(rowTip(r))}" data-run="${esc(r.run_id)}"></i>`).join('')}${'<i class="d go"></i>'.repeat(n)}${'<i class="d"></i>'.repeat(Math.max(0,per-rs.length-n))}</div></td>`}).join('')}</tr>`).join('');
+  const done=Object.keys(live.rows).length;$('#mxInfo').textContent=`${done}/${P.total}`;
+}
+$('#matrix').onclick=e=>{const id=e.target.dataset.run;if(!id)return;const r=Object.values(live.rows).find(x=>x.run_id===id);if(r)openDlg(id,JSON.stringify(r,null,2))};
+function agg(rows){const n=rows.length||1,lat=rows.map(r=>r.llm_ms_p50).filter(x=>x!=null).sort((a,b)=>a-b);
+  return {n:rows.length,leak:rows.filter(r=>r.leaked_count>0).length/n,ok:rows.filter(r=>r.task_ok).length/n,blk:rows.filter(r=>r.blocked).length,
+   tok:Math.round(rows.reduce((a,r)=>a+r.prompt_tokens,0)/n),lat:lat.length?lat[Math.floor(lat.length/2)]:null}}
+function paintResults(){
+  const P=live.plan,rows=Object.values(live.rows);if(!P||!rows.length){$('#results').innerHTML='<span class="m">No results yet.</span>';$('#pubBtn').disabled=$('#repBtn').disabled=true;return}
+  const good=rows.filter(r=>!r.error),err=rows.length-good.length;
+  const byC=P.conditions.map(c=>({c,a:agg(good.filter(r=>r.condition===c.id))}));
+  const raw=byC.find(x=>x.c.kind==='raw');
+  let h=`<table><tr><th>condition</th><th>runs</th><th>leak</th><th>task</th><th>blocked</th><th>prompt tok</th><th>p50 ms</th></tr>`+
+   byC.map(({c,a})=>`<tr><td title="${esc(c.label)}"><span class="tag ${c.kind}">${esc(c.id)}</span> <span class="m s">${esc(c.kind==='raw'?c.untrusted:c.security?.model)}</span></td><td>${a.n}</td>
+    <td class="${a.n?(a.leak>0?'poor':'good'):''}">${a.n?pct(a.leak):'–'}</td><td>${a.n?pct(a.ok):'–'}</td><td>${a.blk}</td><td>${a.n?a.tok:'–'}${raw&&raw.a.n&&a.n&&c.kind!=='raw'?` <span class="m s">${a.tok>=raw.a.tok?'+':''}${Math.round((a.tok/raw.a.tok-1)*100)}%</span>`:''}</td><td>${a.lat??'–'}</td></tr>`).join('')+`</table>`;
+  if(err) h+=`<div class="w s" style="margin-top:4px">${err} run(s) ended in an error and are excluded.</div>`;
+  h+=`<details style="margin-top:6px"><summary>per case</summary><table><tr><th>case</th>${P.conditions.map(c=>`<th>${esc(c.id)}</th>`).join('')}</tr>`+
+   P.cases.map(cs=>`<tr><td>${esc(cs.replace(/^uc(\d+)-/,'UC$1 '))}</td>${P.conditions.map(c=>{const a=agg(good.filter(r=>r.case===cs&&r.condition===c.id));return `<td>${a.n?`<span class="${a.leak>0?'poor':'good'}">${pct(a.leak)}</span> / ${pct(a.ok)}`:'–'}</td>`}).join('')}</tr>`).join('')+
+   `</table><div class="m s">leak / task success</div></details>`;
+  $('#results').innerHTML=h;
+  const fin=['finished','failed','cancelled'].includes(live.status);$('#pubBtn').disabled=!fin||!live.id;$('#repBtn').disabled=!fin||!live.id;
+}
+$('#pubBtn').onclick=async()=>{try{const r=await api(`/api/campaigns/${live.id}/publish`,{});log('published → '+r.path)}catch(e){log('publish: '+e.message,'error')}};
+$('#repBtn').onclick=async()=>{const d=await api(`/api/campaigns/${live.id}`);openDlg('report.md — '+live.id,d.report||'(no report)')};
+function openDlg(t,b){$('#dlgT').textContent=t;$('#dlgB').textContent=b;$('#dlg').showModal()}
+const BUSY=['starting','running'];
+function paintHeader(){
+  const st=live.status,busy=BUSY.includes(st),P=live.plan,done=Object.keys(live.rows).length;
+  const go=$('#go');go.textContent=busy?'Stop':'Start';go.className=busy?'dng':'pri';go.disabled=!busy&&!S.canStart;
+  const cls={running:'run',starting:'run',finished:'ok',failed:'bad',cancelled:'warn'}[st]||'';
+  $('#state').className='pill '+cls;$('#state').textContent=st+(P&&busy?` ${done}/${P.total}`:'');
+  $('#bar i').style.width=P&&P.total?(100*done/P.total)+'%':'0';
+  const rows=Object.values(live.rows),leaks=rows.filter(r=>r.leaked_count>0&&r.condition!=='raw'&&(P?.conditions.find(c=>c.id===r.condition)?.kind==='masqai')).length;
+  $('#summary').textContent=P?`${live.id||''}${leaks?` · ${leaks} masqai leak(s)`:''}`:'';
+  $$('section.col[data-tab=setup] input,section.col[data-tab=setup] select,section.col[data-tab=setup] button,section.col[data-tab=gw] input,section.col[data-tab=gw] select,section.col[data-tab=gw] button,section.col[data-tab=gw] textarea,#preset').forEach(el=>el.disabled=busy);
+}
+function paintAll(){paintHeader();paintMatrix();paintResults()}
+
+// ---------- history / logs ----------
+function renderHist(){
+  $('#hist').innerHTML=(S.campaigns||[]).map(c=>`<div class="hist"><span class="grow" title="${esc(c.id)}">${esc(c.id)}</span><span class="m s">${c.runs} runs${c.errors?` · <span class="w">${c.errors} err</span>`:''}${c.selfTest?' · self-test':''}</span>
+   <button class="ic" data-open="${esc(c.id)}">open</button><button class="ic" data-cfg="${esc(c.id)}" title="load this config">reuse</button></div>`).join('')||'<span class="m">No campaigns yet.</span>';
+}
+$('#hist').onclick=async e=>{
+  const id=e.target.dataset.open||e.target.dataset.cfg;if(!id)return;const d=await api('/api/campaigns/'+encodeURIComponent(id));
+  if(e.target.dataset.cfg){if(d.config){cfg=merge(DEF,d.config);bindAll();changed();showTab('setup')}return}
+  if(BUSY.includes(live.status))return;
+  const conds=d.meta?.conditions||[...new Set(d.rows.map(r=>r.condition))].map(id=>({id,kind:id==='raw'?'raw':'masqai',label:id}));
+  live={id,rows:Object.fromEntries(d.rows.map((r,i)=>[i,r])),running:{},results:d.results,status:'finished',
+    plan:{id,total:d.rows.length,cases:d.meta?.cases||[...new Set(d.rows.map(r=>r.case))],conditions:conds}};
+  paintAll();loadLogs();
+};
+$('#refresh').onclick=()=>loadState();
+async function loadLogs(){
+  if(!live.id)return;
+  try{const d=await api(`/api/campaigns/${live.id}/logs/relay.log`);$('#logSel').innerHTML='<option value="">service logs…</option>'+d.logs.map(n=>`<option>${esc(n)}</option>`).join('')}catch{}
+}
+$('#logSel').onchange=async e=>{if(!e.target.value)return;const d=await api(`/api/campaigns/${live.id}/logs/${e.target.value}`);openDlg(e.target.value,d.text||'(empty)');e.target.value=''};
+$('#clrLog').onclick=()=>$('#log').textContent='';
+
+// ---------- tabs ----------
+function showTab(t){$$('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));$$('section.col').forEach(s=>s.classList.toggle('on',s.dataset.tab===t))}
+$$('nav button').forEach(b=>b.onclick=()=>showTab(b.dataset.t));
+
+// ---------- boot ----------
+const fitNav=()=>document.documentElement.style.setProperty('--hh',$('header').offsetHeight+'px');
+addEventListener('resize',fitNav);fitNav();
+async function loadState(){
+  S={...S,...await api('/api/state')};
+  renderHist();
+  $('#envs').innerHTML=Object.entries(S.env).map(([k,v])=>`<span class="pill ${v?'ok':'warn'}">${k} ${v?'set':'unset'}</span>`).join(' ');
+}
+(async()=>{
+  if(!TOKEN){document.body.innerHTML='<p style="padding:20px">Open the URL printed by <code>python -m eval.gui</code> (it carries the session token).</p>';return}
+  try{await loadState()}catch(e){document.body.innerHTML=`<p style="padding:20px" class="e">${esc(e.message)} — restart <code>python -m eval.gui</code> and use its URL.</p>`;return}
+  const saved=localStorage.getItem('evcfg');
+  cfg=merge(DEF,saved?JSON.parse(saved):(S.presets.selftest||Object.values(S.presets)[0]||{}));
+  renderPresets();bindAll();check();
+  if(S.current){live.id=S.current.id;live.status=S.current.status}
+  connect(0);paintAll();
+})();
+</script>
+</body></html>

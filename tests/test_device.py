@@ -321,11 +321,12 @@ class Cli(unittest.TestCase):
         self.assertEqual(self.board.files, {})
         self.assertFalse(out.exists())
 
-    def test_bench_transport_warns(self):
+    def test_lan_transport_warns_about_the_network_boundary(self):
         script = Scripted([], [])
         with patch.object(D, "open_transport", lambda spec: LoopTransport(self.device)):
             D.main(["status", "--port", "tcp://127.0.0.1:7777"], script.console())
-        self.assertIn("bench transport", script.said[0])
+        self.assertIn("LAN transport", script.said[0])
+        self.assertIn("trusted", script.said[0])
 
 
 class Transports(unittest.TestCase):

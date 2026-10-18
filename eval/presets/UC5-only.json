@@ -1,0 +1,112 @@
+{
+  "name": "hybrid",
+  "cases": [
+    "uc5-identity"
+  ],
+  "runs": 1,
+  "concurrency": 8,
+  "sandbox": "daytona",
+  "self_test": false,
+  "allow_local_untrusted": false,
+  "publish": false,
+  "conditions": [
+    {
+      "id": "raw",
+      "kind": "raw",
+      "untrusted": "google/gemini-3.8-flash",
+      "security": null,
+      "enabled": true
+    },
+    {
+      "id": "gemini-flash",
+      "kind": "masqai",
+      "untrusted": "google/gemini-3.8-flash",
+      "security": {
+        "provider": "openrouter-security",
+        "model": "google/gemini-3.8-flash",
+        "think": true
+      },
+      "enabled": true
+    },
+    {
+      "id": "qwen3-8-27b",
+      "kind": "masqai",
+      "untrusted": "google/gemini-3.8-flash",
+      "security": {
+        "provider": "openrouter-security",
+        "model": "qwen/qwen3.8-27b",
+        "think": true
+      },
+      "enabled": true
+    }
+  ],
+  "gateway": {
+    "providers": [
+      {
+        "name": "ollama-local",
+        "base_url": "http://127.0.0.1:11434",
+        "format": "openai"
+      },
+      {
+        "name": "openrouter-security",
+        "base_url": "https://openrouter.ai/api",
+        "api_key_env": "OPENROUTER_API_KEY",
+        "format": "openai"
+      }
+    ],
+    "security": {
+      "api_format": "openai",
+      "allow_remote_security_model": true,
+      "context_mode": "full",
+      "recent_items": 12,
+      "nearest_ops": -1,
+      "op_context_lines": 2,
+      "auto_mask": "auto_veto",
+      "tool_rejection": "error",
+      "timeout_s": 300
+    },
+    "detectors": {
+      "detect_host_identifiers": false,
+      "custom_values": [],
+      "rules_dir": "masqai/rules"
+    },
+    "retention": {
+      "idle_ttl_h": 12,
+      "max_sessions": 200
+    },
+    "upstream_timeout_seconds": 300,
+    "pass_unknown": false,
+    "headers": {
+      "mode": "blocklist",
+      "user_agent": "masqai/0.2.0"
+    }
+  },
+  "agent": {
+    "max_turns": 12,
+    "command_timeout_s": 120,
+    "run_timeout_s": 900,
+    "max_tokens": 2048,
+    "temperature": 0.0,
+    "rate_limit_retries": 8,
+    "http_timeout_s": 300.0,
+    "stream": false
+  },
+  "harness": {
+    "seed_timeout_s": 120,
+    "check_timeout_s": 60
+  },
+  "relay": {
+    "port": 8788,
+    "upstream": "https://openrouter.ai/api",
+    "key_env": "OPENROUTER_API_KEY",
+    "max_records": 5000
+  },
+  "services": {
+    "gateway_base_port": 8801,
+    "ready_timeout_s": 60.0,
+    "fake_llm_ports": [
+      8796,
+      8797
+    ]
+  }
+}

@@ -364,6 +364,29 @@ class Through(unittest.TestCase):
             self.assertNotIn("sk-or-v1", body)
             self.assertNotIn(TOKEN, body)
 
+    def test_export_api_matches_public_schema_without_secrets(self):
+        ring = self.ring()
+        with gateway(keyring=ring) as (app, client, fakes), client:
+            self.assertEqual(client.get("/api/enigma/export").status_code, 401)
+            result = api(client, "GET", "/api/enigma/export")
+            self.assertEqual(result.status_code, 200)
+            body = result.json()
+            self.assertEqual(body["status"], "live")
+            self.assertEqual(body["provider"], "OpenRouter")
+            self.assertEqual(body["honeytokens"], [])
+            self.assertTrue(body["keys"])
+            self.assertEqual(set(body["keys"][0]), {"label", "createdAt", "activeUntil", "revokedAt"})
+            text = result.text
+            for minted in self.backend.live.values():
+                self.assertNotIn(minted.key, text)
+                self.assertNotIn(minted.hash, text)
+            self.assertNotIn("sk-or-v1", text)
+
+    def test_export_api_is_unavailable_without_a_rotating_source(self):
+        with gateway() as (app, client, fakes), client:
+            result = api(client, "GET", "/api/enigma/export")
+            self.assertEqual(result.status_code, 404)
+
     def test_config_api_never_shows_our_keys(self):
         ring = self.ring()
         with gateway(keyring=ring) as (app, client, fakes), client:

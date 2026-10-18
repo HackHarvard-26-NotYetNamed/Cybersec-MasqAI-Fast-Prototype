@@ -1,0 +1,39 @@
+{
+  "name": "selftest",
+  "cases": "all",
+  "runs": 1,
+  "concurrency": 4,
+  "sandbox": "local",
+  "self_test": true,
+  "publish": false,
+  "conditions": [
+    {"id": "raw", "kind": "raw", "untrusted": "fake-agent"},
+    {"id": "fake-a", "kind": "masqai", "untrusted": "fake-agent",
+     "security": {"provider": "fake-security", "model": "fake-security"}},
+    {"id": "fake-b", "kind": "masqai", "untrusted": "fake-agent",
+     "security": {"provider": "fake-security", "model": "fake-security-b"}}
+  ],
+  "gateway": {
+    "upstream_timeout_seconds": 300,
+    "providers": [
+      {"name": "fake-security", "base_url": "http://127.0.0.1:8797", "format": "openai"}
+    ],
+    "pass_unknown": false,
+    "security": {
+      "api_format": "openai",
+      "allow_remote_security_model": false,
+      "context_mode": "recent",
+      "recent_items": 12,
+      "nearest_ops": -1,
+      "op_context_lines": 2,
+      "auto_mask": "auto_veto",
+      "tool_rejection": "rewrite",
+      "timeout_s": 30
+    },
+    "detectors": {"detect_host_identifiers": false, "custom_values": [], "rules_dir": "masqai/rules"},
+    "headers": {"mode": "blocklist", "user_agent": "masqai/0.2.0"},
+    "retention": {"idle_ttl_h": 12, "max_sessions": 200}
+  },
+  "agent": {"max_turns": 12, "command_timeout_s": 60, "run_timeout_s": 300, "max_tokens": 2048, "stream": false},
+  "relay": {"port": 8788}
+}

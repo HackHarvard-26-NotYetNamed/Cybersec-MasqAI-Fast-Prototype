@@ -140,6 +140,19 @@ class Http(unittest.TestCase):
         self.assertIn(b"Content-Length: 2\r\n\r\n{}", raw)
 
 
+class LanDeployment(unittest.TestCase):
+    def test_persistent_lan_entrypoint_uses_owner_marker_real_tls_and_watchdog(self):
+        from pathlib import Path
+        source = (Path(__file__).parents[1] / "firmware" / "esp32" / "lan_app.py").read_text()
+        self.assertIn('"/enigma/lan_enroll"', source)
+        self.assertIn('display.text(str(line)[:21]', source)
+        self.assertIn('Board(wdt=True', source)
+        self.assertIn('TcpLink(7777)', source)
+        self.assertIn('serve(device, link, board, idle=_idle)', source)
+        self.assertNotIn('bench_target.json', source)
+        self.assertNotIn('20 * 60', source)
+
+
 NOW = 1_800_000_000
 
 

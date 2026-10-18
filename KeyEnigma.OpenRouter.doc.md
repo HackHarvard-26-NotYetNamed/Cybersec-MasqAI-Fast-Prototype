@@ -635,13 +635,34 @@ Custody tests (`tests/test_custody.py`):
 16. `DeviceBackend` against a fake serial device: timeouts, a device reboot mid-command, and reconnection.
 
 **Q: How do we fill in the (unverified) facts?**
-With `eval/enigma_probe.py`, a manual script that is never run in CI. It uses a real management key and a $0.10
-per-key limit, and measures:
+With `eval/enigma_probe.py`, a manual script that is never run in CI. It reads the management credential from
+`OPENROUTER_MANAGEMENT_KEY` in `ormanagement.env` (or the process environment); it is never passed as an argument. A live run requires `--execute --confirm-budget`,
+an explicit dedicated workspace UUID, and uses inference keys limited to $0.10 each. At the defaults it measures:
 - the creation propagation delay;
 - the revocation propagation delay, over 20 samples;
-- the management endpoint behavior under 1 mint per 10 s for 5 min (stopping at the first `429`);
-- whether `PATCH expires_at` is accepted.
-Results go into a new "OpenRouter facts" table in this document and update the defaults in §5.
+- management endpoint behavior under one mint per 10 s for 5 min, stopping at the first `429` and deleting each
+  probe key immediately;
+- no `PATCH expires_at` test: the OpenAPI schema says that field is not patchable.
+
+The maximum default run creates up to 50 keys ($5 total configured key limits); set `--rate-minutes 0` to run only the
+20 propagation samples ($2 total configured key limits). The rate phase also creates keys, deleting each immediately.
+Results are emitted as JSON without key values. Record
+measurements in an "OpenRouter facts" table here and update §5 defaults only when the evidence warrants it.
+
+**OpenRouter facts measured 2026-10-18** (workspace `0f08ec6b-562f-4a09-b4fe-cfbc881d0ee6`, 20 propagation samples,
+29 rate-phase mints at 10-second spacing; each probe key was deleted immediately):
+
+| Measurement | Result |
+|---|---:|
+| Management key and workspace budget | accepted |
+| Create-to-`GET /api/v1/key` accepted, median / max | 0.696 s / 1.156 s |
+| Delete-to-`GET /api/v1/key` rejected, median / min / max | 16.969 s / 1.203 s / 17.813 s |
+| Management mint cadence | 29 mints in 5 min at 10 s; no `429` |
+| Probe keys remaining after cleanup check | 0 |
+| `PATCH expires_at` | not applicable; field is not patchable |
+
+The revocation result is variable but was approximately 17 seconds in 19 of 20 samples. Keep the existing drain and
+expiry margins above this measured delay rather than treating it as a guaranteed bound.
 
 ---
 
@@ -861,7 +882,7 @@ Results go into a new "OpenRouter facts" table in this document and update the d
      weakened guards across the firmware and the host backend: MACs, counters, relock, policy caps, journal scope,
      sealing, enrollment checks, the reply checks on the host) had every one caught.
 9. The probe script against the real API, then tune the defaults.
-10. Export to `keys.json`, then switch `/trust` to `status: "live"`.
+10. `GET /api/enigma/export` serves the live public timeline. `python scripts/export_enigma.py --url <gateway> --token <admin-token>` validates and writes it to `web/public/data/keys.json`; `/trust` reads the file's `status` and marks Key Enigma live. Honeytokens remain planned and the exported list is empty until implemented.
 
 Steps 1–5 do not depend on the mode, so steps 6 and 7–8 can run in parallel.
 

@@ -198,20 +198,20 @@ class SerialTransport:
 
 
 class TcpTransport:
-    """BENCH ONLY: the same frames over TCP to a board running the bench firmware (no USB-TTL adapter). Frames are
-    still authenticated and secrets encrypted, but §13.2's "no radio path to the host" does not hold."""
+    """LAN transport to an ESP32 key-provider. Frames are authenticated and secret payloads are encrypted."""
 
     def __init__(self, host: str, port: int) -> None:
         self.addr = (host, port)
         self.sock: socket.socket | None = None
         self.buf = b""
+        self.closed = False
 
     def _connect(self) -> socket.socket:
         if self.sock is None:
             try:
                 self.sock = socket.create_connection(self.addr, timeout=10)
             except OSError as exc:
-                raise BackendUnavailable(f"cannot reach the bench device at {self.addr[0]}:{self.addr[1]}: {type(exc).__name__}") from None
+                raise BackendUnavailable(f"cannot reach the LAN device at {self.addr[0]}:{self.addr[1]}: {type(exc).__name__}") from None
             self.buf = b""
         return self.sock
 
@@ -220,7 +220,7 @@ class TcpTransport:
             self._connect().sendall(data)
         except OSError:
             self.reset()
-            raise BackendUnavailable("lost the connection to the bench device") from None
+            raise BackendUnavailable("lost the connection to the LAN device") from None
 
     def readline(self, timeout: float) -> bytes:
         sock = self._connect()
@@ -233,13 +233,14 @@ class TcpTransport:
             try:
                 chunk = sock.recv(4096)
             except socket.timeout:
-                continue
+                self.reset()
+                raise BackendUnavailable("the LAN device did not answer before the command timeout") from None
             except OSError:
                 self.reset()
-                raise BackendUnavailable("lost the connection to the bench device") from None
+                raise BackendUnavailable("lost the connection to the LAN device") from None
             if not chunk:
                 self.reset()
-                raise BackendUnavailable("the bench device closed the connection")
+                raise BackendUnavailable("the LAN device closed the connection")
             self.buf += chunk
             if len(self.buf) > MAX_LINE * 2:
                 self.reset()
@@ -257,15 +258,16 @@ class TcpTransport:
         self.buf = b""
 
     def close(self) -> None:
+        self.closed = True
         self.reset()
 
 
 def open_transport(spec: str) -> Transport:
-    """`COM5`, `/dev/ttyUSB0`, or `tcp://HOST:PORT` (bench only)."""
+    """`COM5`, `/dev/ttyUSB0`, or `tcp://HOST:PORT` for a paired LAN device."""
     if spec.startswith("tcp://"):
         host, _, port = spec[len("tcp://"):].rpartition(":")
         if not host or not port.isdigit():
-            raise CustodyError("a bench transport looks like tcp://192.168.1.50:7777")
+            raise CustodyError("a LAN transport looks like tcp://192.168.1.50:7777")
         return TcpTransport(host, int(port))
     return SerialTransport(spec)
 
@@ -663,7 +665,7 @@ def open_device_backend(*, serial_port: str, device_id: str, pairing_file: str |
         pairing.wipe()
         raise CustodyError(f"{path} pairs {pairing.device_id}, not {device_id}")
     if serial_port.startswith("tcp://"):
-        print("  WARNING: bench transport (TCP). The §13.2 guarantee needs a 3-wire UART; do not use this in production.",
+        print("  WARNING: LAN transport. Use only on a trusted, access-controlled network; TCP replaces the production UART.",
               flush=True)
     try:
         link = transport or open_transport(serial_port)
@@ -823,13 +825,13 @@ def cmd_unpair(spec: str, console: Console, *, pairing_file: str | None, device_
 def main(argv: list[str] | None = None, console: Console | None = None, *, transport: Transport | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m masqai.device", description="Key Enigma key-provider device")
     parser.add_argument("command", choices=["enroll", "status", "unpair"])
-    parser.add_argument("--port", required=True, help="serial port (COM5, /dev/ttyUSB0) or tcp://HOST:PORT (bench only)")
+    parser.add_argument("--port", required=True, help="serial port or tcp://HOST:PORT for a LAN device")
     parser.add_argument("--device-id", default=None)
     parser.add_argument("--pairing-file", default=None)
     args = parser.parse_args(argv)
     console = console or _default_console()
     if args.port.startswith("tcp://"):
-        console.say("  WARNING: bench transport (TCP). Production uses a 3-wire UART (§13.2).")
+        console.say("  WARNING: LAN transport. Use only on a trusted, access-controlled network.")
     try:
         if args.command == "enroll":
             cmd_enroll(args.port, console, out=args.pairing_file, transport=transport)

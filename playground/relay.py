@@ -158,9 +158,11 @@ def create_app(upstream: str, key_env: str | None, eval_model: str | None = None
             body = {"_unparsed": raw.decode("utf-8", "replace")}
         entry = record(request, body, raw) if request.method == "POST" else None
         if entry and entry["tag"] and isinstance(body, dict):
-            if not eval_model:
-                return JSONResponse({"error": {"message": "eval/<run_id> model tag needs relay.py --eval-model"}}, status_code=400)
-            body = {**body, "model": eval_model}
+            target = forward_model_of(body) or eval_model
+            if not target:
+                return JSONResponse({"error": {"message": "eval/<run_id> model tag needs relay.py --eval-model "
+                                                          "(or the eval/<run_id>/<model> form)"}}, status_code=400)
+            body = {**body, "model": target}
             raw = json.dumps(body).encode()
         started = time.time()
         url = endpoint_url(upstream, "/v1/" + path)
@@ -213,8 +215,20 @@ def create_app(upstream: str, key_env: str | None, eval_model: str | None = None
 
 
 def tag_of(body: Any) -> str | None:
+    """`eval/<run_id>` or `eval/<run_id>/<untrusted model>` → <run_id>."""
     model = body.get("model") if isinstance(body, dict) else None
-    return model[5:] if isinstance(model, str) and model.startswith("eval/") else None
+    if not (isinstance(model, str) and model.startswith("eval/")):
+        return None
+    return model[5:].split("/", 1)[0] or None
+
+
+def forward_model_of(body: Any) -> str | None:
+    """The untrusted model named in `eval/<run_id>/<model>` (lets one relay serve several eval baselines)."""
+    model = body.get("model") if isinstance(body, dict) else None
+    if not (isinstance(model, str) and model.startswith("eval/")):
+        return None
+    parts = model[5:].split("/", 1)
+    return parts[1] if len(parts) == 2 and parts[1] else None
 
 
 def usage_of(content: bytes) -> dict | None:

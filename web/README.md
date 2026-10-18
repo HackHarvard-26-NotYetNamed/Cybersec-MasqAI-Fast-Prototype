@@ -90,10 +90,13 @@ Notes on the fields:
 Produced by the Daytona harness in [`eval/`](../eval/README.md):
 
 ```bash
-python -m eval.run_eval --cases all --conditions raw,masqai --runs 20
+python -m eval.run_eval --config local-security-models --runs 20 --publish   # or the GUI: python -m eval.gui
 python -m eval.run_eval --injection --runs 20        # optional: fills `injection`
-python -m eval.aggregate eval/out/runs.jsonl > web/public/data/results.json
+python -m eval.aggregate eval/out/campaigns/<id>/runs.jsonl   # re-aggregate a campaign (writes its report.md)
 ```
+
+With several masqai conditions, the site shows the first raw and the first masqai condition; the full
+per-condition data stays in `conditions` / `cases[].conditions`.
 
 ```json
 {
@@ -138,8 +141,11 @@ python -m eval.aggregate eval/out/runs.jsonl > web/public/data/results.json
 - Times are seconds since the start of the demo.
 - The grace period runs from `activeUntil` to `revokedAt`.
 - `"usedAt": null` means the canary was never triggered.
-- While `status` is `planned`, `/trust` is labeled as a design preview. Set it to `live` once the
-  stretch feature ships and the log is real.
+- The checked-in file remains `planned` demo data until replaced by a real gateway export. With a running Key Enigma
+  gateway, export its public timeline using `python scripts/export_enigma.py --url http://127.0.0.1:8787 --token <admin-token>`.
+  The token is the local GUI admin token printed at gateway startup. The exporter validates and writes only labels and
+  relative times; it strips hashes and all extra fields. `/trust` displays the live badge when the exported file says
+  `status: "live"`. Honeytokens remain planned until that feature is implemented.
 
 ### `media/media.json`: GUI recordings for `/run-it`
 

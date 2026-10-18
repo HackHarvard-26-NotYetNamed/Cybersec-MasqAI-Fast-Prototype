@@ -20,7 +20,7 @@ export default function TrustPage() {
             Key Enigma
           </h2>
           <p className="mt-2 text-lg text-pretty text-muted-foreground">A fresh key every 15 minutes: a leaked one dies fast.</p>
-          <p className="mt-2 inline-flex rounded-full border px-2.5 py-0.5 font-mono text-xs">In progress · key leases done</p>
+          <p className="mt-2 inline-flex rounded-full border px-2.5 py-0.5 font-mono text-xs">Rotation timeline · gateway export</p>
         </article>
         <article className="rounded-xl border bg-card p-5">
           <h2 className="flex items-center gap-2 text-lg font-semibold">

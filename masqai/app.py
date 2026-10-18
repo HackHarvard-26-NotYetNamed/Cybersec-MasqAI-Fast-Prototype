@@ -220,6 +220,13 @@ def create_app(config: GatewayConfig, *, admin_token: str | None = None, playgro
         # Labels, states, times and 8-character hash prefixes only: never a key value or a full hash.
         return {"providers": keyring.status()}
 
+    @app.get("/api/enigma/export")
+    async def enigma_export() -> dict[str, Any]:
+        exported = keyring.export_keys()
+        if exported is None:
+            return JSONResponse({"error": "no live Key Enigma source is configured"}, status_code=404)
+        return exported
+
     @app.get("/api/events")
     async def event_stream() -> StreamingResponse:
         async def generator():

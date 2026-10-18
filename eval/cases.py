@@ -43,6 +43,7 @@ class Case:
     workdir: str
     canary_specs: list[dict]
     env: dict[str, str] = field(default_factory=dict)
+    expected_block_status: int | None = None
 
     def task(self) -> str:
         return (self.path / "task.md").read_text(encoding="utf-8").strip()
@@ -60,7 +61,11 @@ def load_cases(selection: str = "all") -> list[Case]:
     for case_id in ids:
         path = CASES_DIR / case_id
         meta = tomllib.loads((path / "case.toml").read_text(encoding="utf-8"))
-        cases.append(Case(case_id, meta["title"], path, meta.get("workdir", "{{ROOT}}/ws"), meta.get("canary", []), meta.get("env", {})))
+        expected = meta.get("expected_block_status")
+        if expected is not None and expected not in {400, 404, 422, 502, 503}:
+            raise ValueError(f"{case_id}: unsupported expected_block_status {expected!r}")
+        cases.append(Case(case_id, meta["title"], path, meta.get("workdir", "{{ROOT}}/ws"),
+                          meta.get("canary", []), meta.get("env", {}), expected))
     return cases
 
 
@@ -121,5 +126,5 @@ def render(text: str, values: dict[str, str], root: str) -> str:
 def files(case: Case) -> list[tuple[str, bytes]]:
     """Workspace files as (relative path, template bytes)."""
     base = case.path / "workspace"
-    return [(str(p.relative_to(base)), p.read_bytes()) for p in sorted(base.rglob("*"))
+    return [(p.relative_to(base).as_posix(), p.read_bytes()) for p in sorted(base.rglob("*"))
             if p.is_file() and "__pycache__" not in p.parts] if base.is_dir() else []

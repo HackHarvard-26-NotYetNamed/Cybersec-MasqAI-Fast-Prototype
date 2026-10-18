@@ -98,6 +98,13 @@ class KeyRing:
     def status(self) -> list[dict[str, Any]]:
         return [source.snapshot() for source in self._sources.values() if hasattr(source, "snapshot")]
 
+    def export_keys(self) -> dict[str, Any] | None:
+        exports = [source.export_keys() for source in self._sources.values() if hasattr(source, "export_keys")]
+        if not exports:
+            return None
+        keys = sorted((key for item in exports for key in item["keys"]), key=lambda key: (key["createdAt"], key["label"]))
+        return {"status": "live", "provider": "OpenRouter", "keys": keys, "honeytokens": []}
+
     async def start(self) -> None:
         """Called by the app's lifespan before it accepts traffic: rotating sources obtain their first key."""
         for source in self._sources.values():
@@ -250,6 +257,8 @@ class EnigmaKeySource:
         self._records: list[KeyRecord] = []          # every key that may still work (not confirmed dead or expired)
         self.history: deque[KeyRecord] = deque(maxlen=20)
         self.events: deque[dict[str, Any]] = deque(maxlen=50)
+        self.export_origin: datetime | None = None
+        self.export_origin_monotonic: float | None = None
         self.propagation_seconds: list[float] = []
         self.spend_usd = 0.0
         self._run_id = secrets.token_hex(2)          # names stay unique across restarts of one install
@@ -421,6 +430,8 @@ class EnigmaKeySource:
             self._event("backend_unhealthy", detail=status.detail)
             raise KeyUnavailable(f"the key backend for {self.name} is not ready: {logs_safe(status.detail)}")
         self.management_expires_at = status.management_expires_at
+        self.export_origin = self.clock.utcnow()
+        self.export_origin_monotonic = self.clock.monotonic()
         self._check_management_expiry()
         try:
             self.cleaned_up = await self.backend.cleanup()
@@ -751,6 +762,35 @@ class EnigmaKeySource:
             "management_expires_at": self.management_expires_at.isoformat() if self.management_expires_at else None,
             "events": list(self.events),
         }
+
+    def export_keys(self) -> dict[str, Any]:
+        """Public lifetime timeline matching web/public/data/keys.json; never exports hashes or key values."""
+        now_mono = self.clock.monotonic()
+        with self._lock:
+            records = list(self._records) + [r for r in self.history if r not in self._records]
+            active = self._active
+        origin_mono = self.export_origin_monotonic if self.export_origin_monotonic is not None else now_mono
+
+        def seconds(at: float) -> float:
+            return round(max(0.0, at - origin_mono), 3)
+
+        timelines = []
+        for record in records:
+            if record.activated_at is None:
+                continue
+            created = seconds(record.minted_at)
+            deadline = record.deadline if record.deadline is not None else record.activated_at + self.policy.interval_seconds
+            active_until = max(created, seconds(deadline))
+            if record.dead_at is not None:
+                revoked = seconds(record.dead_at)
+            elif record.revoked_at is not None:
+                revoked = seconds(record.revoked_at)
+            else:
+                revoked = max(active_until, seconds(now_mono))
+            timelines.append({"label": record.label, "createdAt": created, "activeUntil": active_until,
+                              "revokedAt": max(active_until, revoked)})
+        timelines.sort(key=lambda row: (row["createdAt"], row["label"]))
+        return {"status": "live", "provider": "OpenRouter", "keys": timelines, "honeytokens": []}
 
 
 _KEYISH = re.compile(r"sk-[A-Za-z0-9_-]{8,}")

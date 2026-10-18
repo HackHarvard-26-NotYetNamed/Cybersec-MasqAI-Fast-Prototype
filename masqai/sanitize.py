@@ -362,6 +362,11 @@ class Sanitizer:
                     endpoint = endpoint_url(provider.base_url, "/v1/messages")
                 else:
                     body = {"model": security.model, "temperature": 0, "messages": messages, "response_format": {"type": "json_object"}}
+                    if security.think is False:
+                        body["reasoning_effort"] = "none"
+                        body["think"] = False
+                    elif security.think is True:
+                        body["think"] = True
                     headers = {**({"authorization": f"Bearer {key}"} if key else {}), **provider.headers}
                     endpoint = endpoint_url(provider.base_url, "/v1/chat/completions")
                 async with httpx.AsyncClient(timeout=security.timeout_s) as client:
@@ -443,6 +448,11 @@ class Sanitizer:
         else:
             body = {"model": security.model, "temperature": 0, "messages": [{"role": "system", "content": prompt}, *messages],
                     "response_format": {"type": "json_object"}}
+            if security.think is False:
+                body["reasoning_effort"] = "none"
+                body["think"] = False
+            elif security.think is True:
+                body["think"] = True
             headers = {**({"authorization": f"Bearer {key}"} if key else {}), **provider.headers}
             endpoint = endpoint_url(provider.base_url, "/v1/chat/completions")
         payload = trace.data["security"]["input"]

@@ -46,20 +46,33 @@ class AgentResult:
     commands: int = 0
 
 
+@dataclass
+class AgentLimits:
+    max_turns: int = MAX_TURNS
+    command_timeout_s: int = COMMAND_TIMEOUT_S
+    run_timeout_s: int = RUN_TIMEOUT_S
+    max_tokens: int = MAX_TOKENS
+    temperature: float = 0.0
+    rate_limit_retries: int = RATE_LIMIT_RETRIES
+
+
 async def run_agent(client: httpx.AsyncClient, base_url: str, model: str, headers: dict[str, str], task: str,
-                    sandbox: Sandbox, cwd: str, env: dict[str, str], stream: bool = False) -> AgentResult:
+                    sandbox: Sandbox, cwd: str, env: dict[str, str], stream: bool = False,
+                    limits: AgentLimits | None = None) -> AgentResult:
     """`stream`: ask for SSE like real agents (OpenCode, Claude Code) do, which exercises MasqAI's streaming
     restore and its held-back tool-call inspection instead of the buffered path."""
+    limits = limits or AgentLimits()
     result = AgentResult()
     messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": task}]
-    deadline = time.monotonic() + RUN_TIMEOUT_S
-    while result.turns < MAX_TURNS and time.monotonic() < deadline:
+    deadline = time.monotonic() + limits.run_timeout_s
+    while result.turns < limits.max_turns and time.monotonic() < deadline:
         result.turns += 1
-        for attempt in range(RATE_LIMIT_RETRIES + 1):
+        for attempt in range(limits.rate_limit_retries + 1):
             started = time.monotonic()
-            body = {"model": model, "messages": messages, "tools": TOOLS, "temperature": 0, "max_tokens": MAX_TOKENS}
+            body = {"model": model, "messages": messages, "tools": TOOLS, "temperature": limits.temperature,
+                    "max_tokens": limits.max_tokens}
             response, message, stream_error = await _complete(client, f"{base_url}/chat/completions", headers, body, stream)
-            if response.status_code != 429 or attempt == RATE_LIMIT_RETRIES:
+            if response.status_code != 429 or attempt == limits.rate_limit_retries:
                 break
             result.rate_limited += 1
             await asyncio.sleep(_retry_after(response, attempt))
@@ -96,7 +109,7 @@ async def run_agent(client: httpx.AsyncClient, base_url: str, model: str, header
                 output = "error: the bash tool needs a JSON argument {\"command\": \"...\"}"
             else:
                 result.commands += 1
-                executed = await sandbox.exec(command, cwd, env, COMMAND_TIMEOUT_S)
+                executed = await sandbox.exec(command, cwd, env, limits.command_timeout_s)
                 output = f"exit {executed.exit_code}\n{executed.output}"
             messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": output})
     return result
