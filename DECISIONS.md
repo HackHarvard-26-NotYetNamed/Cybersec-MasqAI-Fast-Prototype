@@ -104,6 +104,32 @@ Design and owner decisions: `KeyEnigma.OpenRouter.doc.md`. The owner agreed to s
   fall back to the env var.
   - The default source, `EnvKeySource`, reads `api_key_env` on every lease, so there is no behavior change.
   - A request that is blocked before forwarding never touches the upstream key.
+- **Step 2 (done): the management-key client is fenced in** (`masqai/custody/`).
+  - It uses its own `httpx` client, fixed to `https://openrouter.ai`. Only an allowlist of management requests can be
+    made, so the management key can't be sent to an inference endpoint by mistake.
+  - Redirects are not followed, and `trust_env=False` ignores proxy and CA settings from the environment. Key hashes
+    and workspace ids are validated before going into a URL, and error text is redacted.
+  - The backend, not the caller, builds key names, so nothing can be minted or cleaned up outside
+    `masqai-enigma-<instance_id>-`.
+  - **A minted key is checked against what was asked for.** If OpenRouter reports a later expiry, a higher limit or a
+    different workspace, the key is revoked at once and not used. The more secure option: those values are the only
+    hard limits on a leaked key.
+  - `limit_reset` is always `null`, so a thief's budget never refills.
+  - A key probe that gets neither 200 nor 401/403 raises an error instead of guessing "valid" or "dead".
+- **Step 3 (done): rotation.** `EnigmaKeySource` mints the next key 60 s ahead, validates it, swaps it in at the
+  jittered interval end, drains the old key, then revokes it.
+  - **The lease enforces the deadline, not only the background task.** After the deadline the old key gets no new
+    leases: the lease swaps to the waiting successor or answers 503. A stalled or crashed rotation task therefore
+    can't extend a key's life.
+  - A key's interval is capped so that interval + drain + skew margin fits inside the `expires_at` OpenRouter
+    actually granted.
+  - **The first key is ready before traffic.** Startup fails closed if no first key validates; there is no
+    fallback to the env key in `closed` mode.
+  - **Keys are masked from mint until confirmed dead.** Standby and revoked-but-maybe-alive keys count as secrets,
+    not only the active key.
+  - Shutdown revokes every key that may still work.
+  - Key values and full hashes never appear in `repr`, logs, events or the snapshot. They show only labels and
+    8-character hash prefixes.
 
 ## Eval harness
 

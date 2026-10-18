@@ -11,7 +11,7 @@ import httpx
 from . import logs
 from .config import GatewayConfig, is_loopback_url
 from .detectors import seed_entities
-from .enigma import KeyRing
+from .enigma import KeyRing, KeyUnavailable
 from pathlib import Path
 
 from .model import ContextItem, HideOp, MaskOp, ReplaceOp, Session
@@ -423,7 +423,11 @@ class Sanitizer:
             raise SanitizationError(f"security provider {provider.name} is not on this machine and allow_remote_security_model is false",
                                     "remote_security_model_refused")
         prompt = security.system_prompt or self._default_prompt()
-        with self.keyring.lease(provider) as key:   # held for exactly this one HTTP call
+        try:
+            lease = self.keyring.lease(provider)
+        except KeyUnavailable as exc:
+            raise SanitizationError(f"no valid key for the security model ({exc})", "security_model_failed") from None
+        with lease as key:   # held for exactly this one HTTP call
             return await self._send(session, messages, trace, attempt, provider, key, prompt)
 
     async def _send(self, session: Session, messages: list[dict[str, Any]], trace: Trace, attempt: int,

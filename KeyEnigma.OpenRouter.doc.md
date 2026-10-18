@@ -72,7 +72,7 @@ ever touches keys it created itself, identified by name prefix (§6).
 | Create | `POST /api/v1/keys` | Body: `name` (required), `limit` (USD, optional), `limit_reset`, `expires_at` (ISO 8601 UTC **with seconds**; minute precision is rejected), `include_byok_in_limit`, `workspace_id`. Returns `201` with `key` (plaintext, **shown once**) and `data.hash`. |
 | Delete | `DELETE /api/v1/keys/{hash}` | Permanent. |
 | Disable | `PATCH /api/v1/keys/{hash}` with `{"disabled": true}` | Our fallback when delete fails. |
-| List | `GET /api/v1/keys?offset=N` | Pages of 100. Used to clean up after a restart. |
+| List | `GET /api/v1/keys?offset=N` | Pages of 100. Used to clean up after a restart. **Lists only the default workspace unless `workspace_id` is given**, and skips disabled keys unless `include_disabled=true` and expired keys unless `include_expired=true` (OpenAPI spec, re-checked 2026-10-18). Cleanup passes both `workspace_id` and `include_disabled=true`. |
 | Get one | `GET /api/v1/keys/{hash}` | `usage`, `limit_remaining`, `last_used_at`. Used to read final spend. |
 | Check a key | `GET /api/v1/key` (with the inference key) | `401` once a key is invalid, disabled or expired. Used to validate a new key and to confirm revocation. |
 
@@ -86,7 +86,9 @@ Other things the docs state:
 **Q: What is not documented?** All of these are **(unverified)** and measured by §11:
 1. Rate limits on the management endpoints themselves.
 2. How long a deleted key keeps working (**revocation propagation delay**).
-3. Whether `PATCH` can change `expires_at` on an inference key. We assume **no** and do not depend on it.
+3. Whether `PATCH` can change `expires_at` on an inference key. **Answered by the OpenAPI spec (2026-10-18): no.**
+   `PATCH /keys/{hash}` accepts only `disabled`, `include_byok_in_limit`, `limit`, `limit_reset`, `name` and
+   `workspace_id`. Nothing in the design depended on it.
 4. Whether the account has a cap on the number of keys.
 5. Whether rapid create/delete cycles trigger abuse detection.
 6. Whether a new key works instantly or needs a short delay (**creation propagation delay**).
@@ -120,11 +122,12 @@ The gateway code does not depend on the mode. Both modes implement one interface
 
 ```python
 class ManagementBackend(Protocol):
-    async def mint(self, *, label: str, expires_at: datetime, limit_usd: float) -> MintedKey: ...  # key, hash, expires_at
-    async def revoke(self, key_hash: str) -> None: ...      # DELETE, falling back to PATCH disabled
+    async def mint(self, *, suffix: str, expires_at: datetime, limit_usd: float) -> MintedKey: ...  # backend adds the prefix
+    async def revoke(self, key_hash: str) -> RevokeOutcome: ...  # DELETE, falling back to PATCH disabled
     async def usage(self, key_hash: str) -> float: ...
     async def cleanup(self) -> int: ...                       # delete leftovers from earlier runs
     async def status(self) -> BackendStatus: ...              # healthy?, expiry if known, policy caps
+    async def aclose(self) -> None: ...
 ```
 
 `PassphraseBackend` calls OpenRouter directly. `DeviceBackend` sends the same operations over serial (§13.4).
@@ -649,8 +652,37 @@ Results go into a new "OpenRouter facts" table in this document and update the d
      early.
    - Every key read goes through `KeyRing.lease()`; `resolved_key()` is called only by `EnvKeySource`.
 2. The `ManagementBackend` protocol, the `OpenRouterKeys` client, a fake OpenRouter in tests, and a fake backend
-   for tests.
-3. `EnigmaKeySource` state machine, leases and drain.
+   for tests. **Done 2026-10-18:**
+   - Code: `masqai/custody/__init__.py` (protocol, errors, `load_backend`) and `masqai/custody/openrouter.py`
+     (`OpenRouterKeys`, `probe_key`, `DirectBackend`).
+   - `DirectBackend` is the host-side backend: passphrase mode (step 6) will be "unseal, then `DirectBackend`".
+   - Interface change from §3: `mint(suffix=...)` replaces `mint(label=...)`. The backend builds
+     `masqai-enigma-<instance_id>-<suffix>` itself, so a caller cannot mint keys outside the install's prefix, which
+     is the same rule the device firmware enforces. `revoke` returns `deleted`, `disabled` or `already_gone`.
+   - After each mint, the expiry, limit and workspace that OpenRouter reports are compared with what was requested.
+     A key that does not match is revoked immediately and never used.
+   - Tests: `tests/test_custody.py`, 32 tests. A mutation check (10 weakened guards, one at a time) confirmed each one
+     is caught. The fakes `FakeOpenRouter` and `FakeBackend` are in `tests/helpers.py`.
+3. `EnigmaKeySource` state machine, leases and drain. **Done 2026-10-18:**
+   - Code: `EnigmaKeySource` and `RotationPolicy` in `masqai/enigma.py`. `KeyRing.start()`/`stop()` run in the app
+     lifespan, so the first key is minted and validated **before** the gateway accepts traffic, and every key that
+     may still work is revoked at shutdown. `KeyUnavailable` becomes `503 masqai_key_unavailable` on the proxy
+     and `/v1/models`, and a fail-closed `SanitizationError` for security-model calls.
+   - **Refinement of §4, the swap:** the successor waits as `STANDBY`. The rotation task normally swaps at the
+     deadline, but `lease()` also swaps, or refuses, as soon as the deadline has passed. So a key never takes a lease
+     after its interval, even if the task is late or has crashed. Both paths use one locked function with no
+     `await`, so they cannot both swap.
+   - **Refinement of §5:** a key's interval is also capped at `expires_at − drain_cap − safety_margin`. If
+     OpenRouter grants a shorter expiry than requested, the key simply rotates sooner, and no stream can outlive it.
+   - `known_secrets()` covers active, standby, draining, and revoked-but-not-yet-confirmed-dead keys. A key leaves
+     the set when a probe returns 401, or at `expires_at`.
+   - Names are `masqai-enigma-<instance>-<run>-<seq>`, with a random 4-hex `run` per start, so names never repeat
+     across restarts. The label stays `enigma-<seq>`.
+   - The `open` failure policy, the emergency rotation on 401/402, and startup cleanup are step 4.
+   - Tests: `tests/test_rotation.py`, 29 tests, using a fake clock, so time-dependent behavior runs in milliseconds.
+     They cover a stream that started on key N, survives the swap, and has N revoked only after it ends;
+     concurrent leases from 4 threads during swaps; and the drain cap. 20 repeated runs had no flakes. A mutation
+     check of 14 weakened guards had every one caught.
 4. Failure policy, emergency rotation and startup cleanup.
 5. Detector, scrub and status API wiring.
 6. **Passphrase mode:** the vault, the CLI, `PassphraseBackend`, and the startup prompt.
@@ -882,13 +914,26 @@ Notes and open checks:
   - If not: ship R4 only. If Cloudflare switches CA, the device fails closed with `TLS_VERIFY_FAILED`. Recovery is
     a new enrollment window to update `ca.der`; `enroll` fetches and shows the new root's fingerprint for the user
     to confirm.
-- **Bench test 1, hostname checking: OPEN.** Connecting to openrouter.ai with `server_hostname="example.com"` does
-  **not** test this. Cloudflare serves a genuine `example.com` certificate that does not chain to R4, so the CA check
-  rejects it first (owner's run, 2026-10-18).
-  - The real test uses a LAN test server with a throwaway CA. It serves a `good.test` certificate whatever SNI the
-    client sends.
-  - `good.test` must connect and `evil.test` must be refused, with the same trusted certificate both times.
-  - The server and kit are verified against CPython's `ssl` first.
+- **Bench test 1, hostname checking: PASSED** (run over ESP32-OTA, 2026-10-18). Connecting to openrouter.ai with
+  `server_hostname="example.com"` does **not** test this: Cloudflare serves a genuine `example.com` certificate that
+  does not chain to R4, so the CA check rejects it first. Instead:
+  - A LAN test server with a throwaway CA served the same `good.test` certificate whatever SNI the client sent. The
+    kit was verified against CPython's `ssl` first.
+  - Results on the board, all four as expected:
+
+    | Requested name + trusted CA | Result |
+    |---|---|
+    | `good.test` + test CA | connected, `HTTP/1.0 200` |
+    | `evil.test` + test CA | refused: `ValueError: The certificate Common Name (CN) does not match with the expected CN` |
+    | `good.test` + wrong CA | refused: `ValueError: … not correctly signed by the trusted CA` |
+    | the server's IP + test CA | refused: CN mismatch |
+
+  - The server log confirms the board sent each requested name as SNI and aborted the handshake itself.
+  - **Conclusion:** `ssl.SSLContext(PROTOCOL_TLS_CLIENT)` with `CERT_REQUIRED` and `server_hostname=` checks both
+    the chain and the name on MicroPython v1.27.0 / ESP32. Device mode can rely on it, so no manual name check is
+    needed in firmware.
+  - The error text mentions only the CN; the test certificate also has a matching SAN. Free heap went from about
+    127 KB before to about 90 KB after four handshakes.
 - **Bench test 2, CA checking: PASSED** (owner's run, COM6, 2026-10-18).
   - Trusting only R4, openrouter.ai connected and returned `HTTP/1.1 200`.
   - The `example.com` certificate, a real one from a different chain, was rejected.

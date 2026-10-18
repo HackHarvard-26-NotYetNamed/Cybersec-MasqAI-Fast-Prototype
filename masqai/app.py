@@ -29,7 +29,7 @@ from .adapter import API_ANTHROPIC, API_CHAT, API_RESPONSES, BadRequest, Unknown
 from .config import (ALWAYS_DROPPED_HEADERS, DEFAULT_HEADER_ALLOWLIST, DEFAULT_HEADER_BLOCKLIST, ENV_NAME_RE,
                      ConfigReferenceError, GatewayConfig, load_config, validation_errors)
 from .detectors import host_values, rule_names
-from .enigma import KeyRing
+from .enigma import KeyRing, KeyUnavailable
 from .hygiene import pseudonymize, stripped_headers
 from .model import Session
 from .policy import CATEGORIES
@@ -127,9 +127,11 @@ def create_app(config: GatewayConfig, *, admin_token: str | None = None, playgro
                 enforce_retention()
         task = asyncio.create_task(loop())
         try:
+            await keyring.start()   # rotating sources hold a validated key before the first request
             yield
         finally:
             task.cancel()
+            await keyring.stop()
 
     app = FastAPI(title="MasqAI Gateway", version=__version__, lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.admin_token = token
@@ -491,6 +493,9 @@ def create_app(config: GatewayConfig, *, admin_token: str | None = None, playgro
             return error(BLOCK_STATUS.get(exc.reason, 502), "masqai_sanitization_error",
                          "MasqAI could not complete inspection, so nothing was sent (fail closed). Details are on the gateway's Security page.",
                          reason=exc.reason)
+        except KeyUnavailable as exc:
+            logs.log.error("refused (fail closed): %s; nothing was sent upstream", exc)
+            return error(503, "masqai_key_unavailable", "no valid upstream key is available right now (Key Enigma, fail closed); nothing was sent")
         except Exception as exc:
             logs.log.exception("gateway error after %.0f ms: %s", (time.monotonic() - started) * 1000, exc.__class__.__name__)
             # Never echo exception text: it can contain request content.
@@ -533,6 +538,8 @@ def create_app(config: GatewayConfig, *, admin_token: str | None = None, playgro
                                              headers=headers_for(provider, dict(request.headers), config.headers, key=key)) as response:
                         content = await read_limited(response)
             return Response(content, status_code=response.status_code, headers=response_headers(response.headers))
+        except KeyUnavailable:
+            return error(503, "masqai_key_unavailable", "no valid upstream key is available right now (Key Enigma, fail closed)")
         except Exception as exc:
             logs.log.error("passthrough %s /v1/%s failed: %s", request.method, path, exc.__class__.__name__)
             return error(502, "masqai_gateway_error", "models passthrough failed")
