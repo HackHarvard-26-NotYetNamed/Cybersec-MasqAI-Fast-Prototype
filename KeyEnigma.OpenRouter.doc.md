@@ -683,8 +683,37 @@ Results go into a new "OpenRouter facts" table in this document and update the d
      They cover a stream that started on key N, survives the swap, and has N revoked only after it ends;
      concurrent leases from 4 threads during swaps; and the drain cap. 20 repeated runs had no flakes. A mutation
      check of 14 weakened guards had every one caught.
-4. Failure policy, emergency rotation and startup cleanup.
-5. Detector, scrub and status API wiring.
+4. Failure policy, emergency rotation and startup cleanup. **Done 2026-10-18:**
+   - `failure_policy: "open"`: past its interval, with no successor ready, the key keeps serving, but only until
+     `expires_at − drain_cap − safety_margin`; then the policy acts as `closed`. A key that was rejected never
+     overstays. The rotation task keeps looking for a successor until that hard deadline and swaps as soon as one
+     validates.
+   - **Emergency rotation:** `rejection_reason()` maps `401` → `revoked_externally` and `402`/`403` with
+     `limit_source: openrouter_key_limit` → `key_limit`. Everything else passes through unchanged (credits,
+     in-flight budget, guardrails, workspace budget).
+     - The key is retired at once and the rotation task wakes to mint a replacement.
+     - A `revoked_externally` key is revoked **without draining**, because it may have leaked. A `key_limit` key
+       drains normally.
+     - Emergencies are capped at 3 per 10 min. Past the cap, the rejected key is still retired, but the gateway
+       stays closed until the window passes, rather than minting in a loop.
+   - **One retry:** the proxy, streaming or not, sees the upstream status before any byte reaches the client. On a
+     key rejection with a fresh key ready, it retries exactly once. With no key ready, the original error is
+     returned.
+   - **Startup cleanup:** `backend.cleanup()` runs **before** the first mint, so it cannot touch this run's keys.
+     A refused management key fails startup. Any other cleanup error is logged, and startup continues, since
+     leftovers die at `expires_at`.
+   - Tests: `tests/test_enigma_policy.py`.
+5. Detector, scrub and status API wiring. **Done 2026-10-18:**
+   - `seed_entities(..., secrets=keyring.known_secrets())`: our own keys are masked **regardless of `protect`**,
+     like custom values. They win over the `openrouter_key` rule's span and are added to a session only where they
+     appear, so they don't fill the mapping table shown in the GUI.
+   - Upstream error text and security-model errors are scrubbed with the same values (`<OR_KEY_enigma>`) before
+     logging.
+   - `GET /api/enigma/status` is admin-token protected and returns, per provider: the active label, keys (label,
+     8-char hash prefix, state, refcount, expiry), approximate spend, propagation delays (count/min/median/max),
+     the cleanup count and the last 50 events. It contains no key values and no full hashes.
+   - Mutation check for steps 4–5: 14 weakened guards, all caught. The step 3 mutation check was re-run after the
+     loop changes and still catches all 14.
 6. **Passphrase mode:** the vault, the CLI, `PassphraseBackend`, and the startup prompt.
 7. **Device mode, firmware logic:** `policy.py`, `proto.py` and `journal.py`, tested under CPython.
 8. **Device mode, hardware side:** the adapter layer on the ESP32 (Wi-Fi, TLS, NVS, the clock via NTP) and the

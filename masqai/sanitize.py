@@ -141,7 +141,7 @@ class Sanitizer:
     async def _sanitize(self, session: Session, items: list[ContextItem], trace: Trace) -> None:
         started = time.monotonic()
         trace.update(stage="detectors")
-        found = seed_entities(session, items, self.config.detectors, self.config.protect.model_dump())
+        found = seed_entities(session, items, self.config.detectors, self.config.protect.model_dump(), self.keyring.known_secrets())
         # Known values (detector hits and earlier masks) are applied everywhere, including system
         # prompts and tool descriptions, at token boundaries only.
         plan_all(session, items)
@@ -514,9 +514,9 @@ class Sanitizer:
         attempts[attempt - 1].update(fields)
         trace.security(attempts=attempts)
 
-    @staticmethod
-    def _masked(text: str, session: Session) -> str:
-        for value, token in session.known_values():
+    def _masked(self, text: str, session: Session) -> str:
+        own = [(value, f"<{kind}_enigma>") for value, kind in self.keyring.known_secrets()]
+        for value, token in [*own, *session.known_values()]:
             if value:
                 text = text.replace(value, token).replace(json.dumps(value)[1:-1], token)
         return text

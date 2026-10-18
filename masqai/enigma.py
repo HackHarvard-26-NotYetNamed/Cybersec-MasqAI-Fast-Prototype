@@ -86,6 +86,15 @@ class KeyRing:
     def known_secrets(self) -> list[tuple[str, str]]:
         return [secret for source in self._sources.values() for secret in source.known_secrets()]
 
+    def report_rejected(self, provider: ProviderConfig, key: str | None, reason: str) -> bool:
+        """Forward an upstream rejection to the provider's rotating source. False if there is none."""
+        source = self._sources.get(provider.name)
+        report = getattr(source, "report_rejected", None)
+        return bool(report and report(key, reason))
+
+    def status(self) -> list[dict[str, Any]]:
+        return [source.snapshot() for source in self._sources.values() if hasattr(source, "snapshot")]
+
     async def start(self) -> None:
         """Called by the app's lifespan before it accepts traffic: rotating sources obtain their first key."""
         for source in self._sources.values():
@@ -124,10 +133,20 @@ class RotationPolicy:
     settle_seconds: float = 5.0             # wait for late charges before reading a key's final usage
     confirm_window_seconds: float = 120.0   # probe a revoked key this long for the first 401
     confirm_every_seconds: float = 2.0
+    # "closed" (default): no validated key -> 503. "open": keep using the current key past its interval while minting
+    # retries, but never past its own expires_at minus the drain and skew margin; then it is closed again (§8).
+    failure_policy: str = "closed"
+    emergency_max: float = 3                # emergency rotations (401 / key limit) allowed per window
+    emergency_window_seconds: float = 600.0
 
     def __post_init__(self) -> None:
-        if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in vars(self).values()):
+        if self.failure_policy not in ("closed", "open"):
+            raise ValueError("failure_policy must be 'closed' or 'open'")
+        numbers = {k: v for k, v in vars(self).items() if k != "failure_policy"}
+        if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in numbers.values()):
             raise ValueError("rotation policy values must be finite numbers")
+        if self.emergency_max < 0 or self.emergency_window_seconds <= 0:
+            raise ValueError("emergency_max must not be negative and emergency_window_seconds must be positive")
         if self.interval_seconds < MIN_INTERVAL_SECONDS:
             raise ValueError(f"interval_seconds must be at least {MIN_INTERVAL_SECONDS:.0f}")
         if not 0 <= self.jitter <= 0.5:
@@ -180,6 +199,7 @@ class KeyRecord:
     usage_usd: float | None = None
     revoke_outcome: str | None = None
     announced: bool = False
+    condemned: str = ""                   # why it must stop now: "revoked_externally" / "key_limit"
     idle: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
 
     @property
@@ -234,6 +254,10 @@ class EnigmaKeySource:
         self._tasks: set[asyncio.Task] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stopped = True
+        self._emergencies: deque[float] = deque()
+        self._cooldown_until = 0.0
+        self._wake = asyncio.Event()                 # set by report_rejected: mint now instead of on schedule
+        self.cleaned_up = 0
 
     # ---------- leases: synchronous, on the request path ----------
     def lease(self) -> KeyLease:
@@ -241,7 +265,7 @@ class EnigmaKeySource:
         with self._lock:
             if self._stopped or self._active is None:
                 raise KeyUnavailable(f"no validated key for {self.name} (fail closed)")
-            if self.clock.monotonic() >= self._active.deadline:
+            if self.clock.monotonic() >= self._active.deadline and not self._may_overstay_locked(self._active):
                 retired = self._swap_locked()
                 if self._active is None:
                     self._after_swap(retired)
@@ -251,6 +275,18 @@ class EnigmaKeySource:
         if retired is not None:
             self._after_swap(retired)
         return KeyLease(record.minted.key, lambda: self._release(record))
+
+    def hard_deadline(self, record: KeyRecord) -> float:
+        """Monotonic time after which a key must take no new lease under any policy: expires_at - drain - margin."""
+        left = ((record.minted.expires_at - self.clock.utcnow()).total_seconds()
+                - self.policy.drain_cap_seconds - self.policy.safety_margin_seconds)
+        return self.clock.monotonic() + max(0.0, left)
+
+    def _may_overstay_locked(self, record: KeyRecord) -> bool:
+        """failure_policy "open": past its interval, with no successor ready, a healthy key keeps serving until its
+        hard deadline. A revoked or exhausted key (marked `condemned`) never overstays."""
+        return (self.policy.failure_policy == "open" and self._standby is None and not record.condemned
+                and self.clock.monotonic() < self.hard_deadline(record))
 
     def _release(self, record: KeyRecord) -> None:
         with self._lock:
@@ -292,9 +328,9 @@ class EnigmaKeySource:
             logs.log.info("enigma %s: %s (%s) active for %.0f s", self.name, active.label, active.short_hash,
                           active.deadline - active.activated_at)
         if retired is not None:
-            if active is None:
+            if active is None and not retired.condemned:
                 self._event("interval_ended_without_successor", retired)
-                logs.log.error("enigma %s: %s's interval ended with no validated successor; refusing requests (fail closed)",
+                logs.log.error("enigma %s: %s retired with no validated successor; refusing requests (fail closed)",
                                self.name, retired.label)
             self._call_on_loop(self._spawn, self._drain_and_revoke(retired))
 
@@ -319,10 +355,62 @@ class EnigmaKeySource:
     def active(self) -> KeyRecord | None:
         return self._active
 
+    # ---------- emergency rotation (§8) ----------
+    def report_rejected(self, key: str | None, reason: str) -> bool:
+        """The upstream refused `key`: 401 (revoked or expired: `revoked_externally`) or 402/403 with
+        limit_source openrouter_key_limit (`key_limit`). Retire it now and wake the rotation task.
+
+        Returns True if a different validated key can be leased right away, so the caller may retry once. Emergency
+        rotations are capped (emergency_max per emergency_window_seconds); past the cap, the key is still retired,
+        but no early mint is triggered, so an attacker forcing 401s can't make us mint in a loop.
+        """
+        if reason not in ("revoked_externally", "key_limit"):
+            raise ValueError(f"unknown rejection reason {reason!r}")
+        retired = None
+        with self._lock:
+            record = self._active
+            if record is None or key is None or record.minted.key != key:
+                # A stale report about an already retired key, or an unrelated value: nothing to do.
+                return self._active is not None and self._active.minted.key != key
+            record.condemned = reason
+            now = self.clock.monotonic()
+            while self._emergencies and now - self._emergencies[0] >= self.policy.emergency_window_seconds:
+                self._emergencies.popleft()
+            allowed = len(self._emergencies) < self.policy.emergency_max
+            if allowed:
+                self._emergencies.append(now)
+            else:
+                # Past the cap: the next early mint waits until the oldest emergency leaves the window.
+                self._cooldown_until = self._emergencies[0] + self.policy.emergency_window_seconds
+            retired = self._swap_locked()
+            ready = self._active is not None
+        self._event(reason, retired, detail="emergency rotation" if allowed else "emergency rotation cap reached")
+        log = logs.log.warning if reason == "key_limit" else logs.log.error
+        log("enigma %s: upstream rejected %s (%s)%s", self.name, retired.label, reason,
+            "" if allowed else "; emergency rotation cap reached, refusing requests until the cap window passes")
+        self._after_swap(retired)
+        self._call_on_loop(self._wake.set)
+        return ready
+
     # ---------- lifecycle ----------
     async def start(self, attempts: int = 3) -> None:
-        """Obtain and activate the first key before the gateway accepts traffic. Raises KeyUnavailable on failure."""
+        """Before the gateway accepts traffic: delete this install's leftover keys from earlier runs (they can't be
+        used: a key value is shown once), then obtain and activate the first key. Raises KeyUnavailable on failure.
+
+        Cleanup runs before the first mint, so it can never delete a key of this run. A failed cleanup is logged and
+        does not block startup: leftovers die at their own expires_at anyway (§6).
+        """
         self._loop = asyncio.get_running_loop()
+        self._wake = asyncio.Event()
+        try:
+            self.cleaned_up = await self.backend.cleanup()
+            self._event("cleanup", detail=f"{self.cleaned_up} leftover key(s) revoked")
+        except ManagementAuthError as exc:
+            self._event("management_key_refused", detail=str(exc))
+            raise KeyUnavailable(f"the management key was refused for {self.name}: {logs_safe(str(exc))}") from None
+        except Exception as exc:   # noqa: BLE001
+            self._event("cleanup_failed", detail=f"{type(exc).__name__}: {exc}")
+            logs.log.warning("enigma %s: startup cleanup failed (%s); leftovers die at their expires_at", self.name, type(exc).__name__)
         delay = 2.0
         for attempt in range(attempts):
             try:
@@ -364,28 +452,34 @@ class EnigmaKeySource:
             while not self._stopped:
                 current = self._active
                 if current is None:
+                    self._wake.clear()
+                    await self._sleep_until(self._cooldown_until)   # after a capped emergency storm
                     successor = await self._obtain()            # fail-closed gap: recover as soon as possible
                     with self._lock:
-                        if not self._stopped:
+                        if not self._stopped and self._active is None:
                             self._start_interval_locked(successor)
                             successor = None
-                    if successor is not None:
-                        await self._revoke(successor, settle=False)
+                    if successor is not None:                  # stopped, or recovered meanwhile: not needed
+                        self._spawn(self._revoke(successor, settle=False))
                     self._after_swap(None)
                     continue
-                await self._sleep_until(current.deadline - self.policy.lead_seconds)
-                successor = await self._obtain_before(current.deadline)
+                if not await self._sleep_or_wake(current.deadline - self.policy.lead_seconds):
+                    continue                                    # emergency: the active key changed
+                # Under "open", keep looking for a successor until the hard deadline, not only the interval end.
+                limit = current.deadline if self.policy.failure_policy == "closed" else max(current.deadline, self.hard_deadline(current))
+                successor = await self._obtain_before(limit)
                 if successor is not None:
                     with self._lock:
                         if self._active is current and not self._stopped:
                             self._standby = successor
                             successor = None
-                    if successor is not None:                  # stopped meanwhile: it was never needed
+                    if successor is not None:                  # replaced or stopped meanwhile: never needed
                         self._spawn(self._revoke(successor, settle=False))
-                await self._sleep_until(current.deadline)
+                        continue
+                    await self._sleep_or_wake(current.deadline)
                 retired = None
                 with self._lock:
-                    if self._active is current:                 # a lease may already have swapped
+                    if self._active is current:                 # a lease or an emergency may already have swapped
                         retired = self._swap_locked()
                 self._after_swap(retired)
                 self._prune()
@@ -394,6 +488,23 @@ class EnigmaKeySource:
         except Exception:   # noqa: BLE001 - leases still stop at the deadline
             logs.log.exception("enigma %s: rotation loop crashed; requests stop when the current interval ends", self.name)
             self._event("rotation_crashed")
+
+    async def _sleep_or_wake(self, when: float) -> bool:
+        """Sleep until `when`. Returns False early if an emergency rotation woke the loop."""
+        if self._wake.is_set():
+            self._wake.clear()
+            return False
+        sleeper = asyncio.ensure_future(self._sleep_until(when))
+        waker = asyncio.ensure_future(self._wake.wait())
+        try:
+            await asyncio.wait({sleeper, waker}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            sleeper.cancel()
+            waker.cancel()
+        if self._wake.is_set():
+            self._wake.clear()
+            return False
+        return True
 
     async def _obtain_before(self, deadline: float) -> KeyRecord | None:
         """A validated successor, or None if the deadline passes first (the search then continues after the swap)."""
@@ -477,7 +588,8 @@ class EnigmaKeySource:
     # ---------- drain and revoke ----------
     async def _drain_and_revoke(self, record: KeyRecord) -> None:
         self._event("draining", record, detail=f"{record.refcount} open lease(s)")
-        if record.refcount > 0:
+        # A key revoked behind our back may have leaked: don't wait for its streams. (They are failing anyway.)
+        if record.refcount > 0 and record.condemned != "revoked_externally":
             idle = asyncio.ensure_future(record.idle.wait())
             cap = asyncio.ensure_future(self.clock.sleep(self.policy.drain_cap_seconds))
             try:
@@ -486,16 +598,17 @@ class EnigmaKeySource:
                 idle.cancel()
                 cap.cancel()
         with self._lock:
-            record.forced = record.refcount > 0
+            record.forced = record.refcount > 0 and record.condemned != "revoked_externally"
             record.state = REVOKING
         if record.forced:
             self._event("drain_cap_reached", record, detail=f"{record.refcount} lease(s) still open")
             logs.log.warning("enigma %s: %s still had %d open lease(s) at the drain cap; revoking anyway",
                              self.name, record.label, record.refcount)
-        await self._revoke(record, settle=True)
+        # A rejected key gets no settle wait: revoke it at once, but still read its usage for the ledger.
+        await self._revoke(record, settle=True, wait=not record.condemned)
 
-    async def _revoke(self, record: KeyRecord, *, settle: bool, confirm: bool = True) -> None:
-        if settle and self.policy.settle_seconds:
+    async def _revoke(self, record: KeyRecord, *, settle: bool, confirm: bool = True, wait: bool = True) -> None:
+        if settle and wait and self.policy.settle_seconds:
             await self.clock.sleep(self.policy.settle_seconds)
         if settle:
             try:
@@ -568,25 +681,56 @@ class EnigmaKeySource:
         self.events.append(event)
 
     def snapshot(self) -> dict[str, Any]:
-        """For the status API (step 5): labels, states and times only. No key values, no full hashes."""
+        """For GET /api/enigma/status: labels, states and times only. No key values, no full hashes."""
         now = self.clock.monotonic()
         with self._lock:
             records = list(self._records)
             active = self._active
+            stopped = self._stopped
+        delays = sorted(self.propagation_seconds)
         return {
             "provider": self.name,
+            "running": not stopped,
+            "failure_policy": self.policy.failure_policy,
+            "interval_seconds": self.policy.interval_seconds,
+            "per_key_limit_usd": self.policy.per_key_limit_usd,
             "active": active.label if active else None,
             "keys": [{"label": r.label, "hash": r.short_hash, "state": r.state, "refcount": r.refcount,
-                      "expires_at": r.minted.expires_at.isoformat(),
+                      "expires_at": r.minted.expires_at.isoformat(), **({"condemned": r.condemned} if r.condemned else {}),
                       "seconds_left": round(max(0.0, r.deadline - now), 1) if r.state == ACTIVE else None}
                      for r in records],
             "spend_usd": round(self.spend_usd, 6),
-            "propagation_seconds": list(self.propagation_seconds),
+            "spend_note": "approximate; OpenRouter's activity page is authoritative",
+            "propagation_seconds": ({"count": len(delays), "min": delays[0], "median": delays[len(delays) // 2], "max": delays[-1]}
+                                    if delays else {"count": 0}),
+            "cleaned_up": self.cleaned_up,
             "events": list(self.events),
         }
 
 
 _KEYISH = re.compile(r"sk-[A-Za-z0-9_-]{8,}")
+
+
+def rejection_reason(status: int, body: bytes) -> str | None:
+    """Does this upstream answer mean *our key* is unusable (§8)? 401 -> revoked or expired. 402/403 with
+    limit_source openrouter_key_limit -> its spend limit is used up. Everything else (credits, in-flight budget,
+    guardrails, workspace budget) passes through unchanged: rotating would not help."""
+    if status == 401:
+        return "revoked_externally"
+    if status in (402, 403):
+        try:
+            import json
+            data = json.loads(body)
+        except (ValueError, UnicodeDecodeError):
+            return None
+        error = data.get("error") if isinstance(data, dict) else None
+        metadata = error.get("metadata") if isinstance(error, dict) else None
+        sources = {data.get("limit_source") if isinstance(data, dict) else None,
+                   error.get("limit_source") if isinstance(error, dict) else None,
+                   metadata.get("limit_source") if isinstance(metadata, dict) else None}
+        if "openrouter_key_limit" in sources:
+            return "key_limit"
+    return None
 
 
 def logs_safe(text: str) -> str:

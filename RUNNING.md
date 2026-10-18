@@ -142,7 +142,9 @@ The GUI shows raw values to you, the local user. Use the playground or a demo ac
 `GET /api/events` (SSE: `trace`, `session`, `forget`, `config`, `warning`, `forwarded`; read it with `fetch`, since
 `EventSource` can't send the header) · `GET`/`POST /api/config` · `GET /api/config/meta` · `GET /api/env/{name}`
 (startup names only, never the value) · `GET /api/sessions/{id}/replay?synthetic=1` (only with `--playground`; streams the
-public site's replay JSON with host identifiers replaced by fake ones; the gateway never writes it to disk).
+public site's replay JSON with host identifiers replaced by fake ones; the gateway never writes it to disk) ·
+`GET /api/enigma/status` (Key Enigma rotation state per provider: labels, states, 8-character hash prefixes,
+approximate spend and events; never a key value; empty until a rotating provider is configured).
 
 Every request that reaches the upstream emits a `forwarded` event with the SHA-256 of the sanitized body. The
 eval harness uses it to count requests.

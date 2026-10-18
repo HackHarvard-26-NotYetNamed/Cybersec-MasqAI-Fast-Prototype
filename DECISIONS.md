@@ -130,6 +130,20 @@ Design and owner decisions: `KeyEnigma.OpenRouter.doc.md`. The owner agreed to s
   - Shutdown revokes every key that may still work.
   - Key values and full hashes never appear in `repr`, logs, events or the snapshot. They show only labels and
     8-character hash prefixes.
+- **Step 4 (done): failure handling.**
+  - `open` is still bounded: a key never takes a lease past `expires_at − drain − margin`, and a rejected key never
+    overstays.
+  - A key revoked behind our back (401) **may have leaked**, so it is revoked immediately without waiting for its
+    streams. A key that only hit its spend limit drains normally.
+  - At most one retry per request. It happens only when the upstream rejected *our key* and a fresh key is ready,
+    and only before any byte reached the client.
+  - The emergency cap (3 per 10 min) fails closed for the rest of the window. An attacker who can force 401s gets
+    an outage, not unlimited minting.
+  - Startup cleanup runs before the first mint. A refused management key fails startup; other cleanup errors don't.
+- **Step 5 (done): our keys are always masked**, even when the user switches off the credentials category. They
+  are the gateway's own secrets, not the user's data.
+  - They come from RAM (`KeyRing.known_secrets()`), never from `custom_values`, which `/api/config` shows.
+  - The status API shows labels and hash prefixes only.
 
 ## Eval harness
 

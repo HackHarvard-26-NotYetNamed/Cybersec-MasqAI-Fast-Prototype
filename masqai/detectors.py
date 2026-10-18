@@ -208,9 +208,13 @@ def host_values() -> list[tuple[str, str]]:
 
 
 def seed_entities(session: Session, items: Iterable[ContextItem], config: DetectorConfig,
-                  protect: dict[str, bool] | None = None) -> list[Entity]:
+                  protect: dict[str, bool] | None = None, secrets: Iterable[tuple[str, str]] = ()) -> list[Entity]:
     """Add every detector hit to the session mapping. Exact copies are then masked automatically (at
-    word boundaries) by ops.plan_item. Returns the entities created by this call."""
+    word boundaries) by ops.plan_item. Returns the entities created by this call.
+
+    `secrets` are the gateway's own credentials, (value, TYPE), from KeyRing.known_secrets(): the upstream keys Key
+    Enigma rotates. Like custom values they are always masked, whatever `protect` says. They come from RAM and are
+    never written to config (custom_values are shown by /api/config)."""
     rules = load_rules(config.rules_dir)
     found: list[Entity] = []
 
@@ -228,6 +232,11 @@ def seed_entities(session: Session, items: Iterable[ContextItem], config: Detect
         # Only the categories the user protects (policy.py); custom values below are always masked.
         fixed += [(v, t, "detector:host") for t, v in host_values() if protected(selection, t)]
     fixed += [(c.value, c.type.upper(), "detector:custom") for c in config.custom_values]
+    # Our own keys join `fixed` for matching, but unlike custom values they are added to a session only where they
+    # actually appear: the mapping table is shown in the GUI and in replay exports.
+    own = [(value, kind, "detector:enigma") for value, kind in secrets if value and len(value) >= MIN_VALUE_LENGTH]
+    standing = list(fixed)
+    fixed += own
     for item in items:
         if item.reasoning or item.opaque or not isinstance(item.original, str):
             continue
@@ -249,11 +258,12 @@ def seed_entities(session: Session, items: Iterable[ContextItem], config: Detect
             pos = text.find(value)
             while pos != -1:
                 end = pos + len(value)
-                inside_rule = any(rsp[0] <= pos and end <= rsp[1] for rsp in rule_spans)
+                # An own key is exactly what the openrouter_key rule also matches: it must win, not be skipped.
+                inside_rule = origin != "detector:enigma" and any(rsp[0] <= pos and end <= rsp[1] for rsp in rule_spans)
                 if not inside_rule:
                     add(value, entity_type, origin, item.id)
                 pos = text.find(value, pos + 1)
-    for value, entity_type, origin in fixed:
+    for value, entity_type, origin in standing:
         if session.entity_for(value) is None:
             add(value, entity_type, origin, None)
     return found

@@ -29,7 +29,7 @@ from .adapter import API_ANTHROPIC, API_CHAT, API_RESPONSES, BadRequest, Unknown
 from .config import (ALWAYS_DROPPED_HEADERS, DEFAULT_HEADER_ALLOWLIST, DEFAULT_HEADER_BLOCKLIST, ENV_NAME_RE,
                      ConfigReferenceError, GatewayConfig, load_config, validation_errors)
 from .detectors import host_values, rule_names
-from .enigma import KeyRing, KeyUnavailable
+from .enigma import KeyRing, KeyUnavailable, rejection_reason
 from .hygiene import pseudonymize, stripped_headers
 from .model import Session
 from .policy import CATEGORIES
@@ -208,6 +208,11 @@ def create_app(config: GatewayConfig, *, admin_token: str | None = None, playgro
     async def security_traces() -> dict[str, Any]:
         return {"traces": traces.as_list(), "limit": traces.traces.maxlen}
 
+    @app.get("/api/enigma/status")
+    async def enigma_status() -> dict[str, Any]:
+        # Labels, states, times and 8-character hash prefixes only: never a key value or a full hash.
+        return {"providers": keyring.status()}
+
     @app.get("/api/events")
     async def event_stream() -> StreamingResponse:
         async def generator():
@@ -315,7 +320,8 @@ def create_app(config: GatewayConfig, *, admin_token: str | None = None, playgro
                 session.in_flight -= 1
 
         def masked(text: str) -> str:
-            return scrub(text, session.known_values())
+            own = [(value, f"<{kind}_enigma>") for value, kind in keyring.known_secrets()]
+            return scrub(text, own + session.known_values())
 
         async def inspect_calls(calls: list[dict[str, Any]]) -> dict[Any, tuple[str, str]]:
             """The inbound tool calls the guardrail rejects: {index, or a stream's call key: (tool, reason)}."""
@@ -375,7 +381,6 @@ def create_app(config: GatewayConfig, *, admin_token: str | None = None, playgro
                           (time.monotonic() - started) * 1000, logs.shape(sanitized))
             table = restore_map(session.restore_table())
             upstream_lease = keyring.lease(provider)
-            outgoing = headers_for(provider, dict(request.headers), config.headers, key=upstream_lease.key)
             recorder = ResponseRecorder()
             observer = ResponseObserver(session, publish)
 
@@ -383,21 +388,39 @@ def create_app(config: GatewayConfig, *, admin_token: str | None = None, playgro
                 if record is not None:
                     record["response"] = {**recorder.result(table), "at": time.time()}
 
+            def rejected_key(status: int, body: bytes) -> bool:
+                """Key Enigma (§8): if the upstream refused *our key*, retire it and lease a fresh one. True means the
+                caller should retry once. Nothing has reached the client yet, and a 401/402 means the provider did
+                not process the request, so the retry can't double-charge."""
+                nonlocal upstream_lease
+                reason = rejection_reason(status, body)
+                if reason is None or not keyring.report_rejected(provider, upstream_lease.key, reason):
+                    return False
+                upstream_lease.release()
+                upstream_lease = keyring.lease(provider)
+                logs.log.warning("upstream refused the key (%s); retrying once with a fresh key", reason)
+                return True
+
             if sanitized.get("stream"):
-                client = httpx.AsyncClient(timeout=config.upstream_timeout_seconds)
-                try:
-                    upstream = await client.send(client.build_request("POST", url, params=request.query_params, json=sanitized, headers=outgoing), stream=True)
-                except BaseException:
-                    await client.aclose()
-                    raise
-                if upstream.status_code >= 400:
+                for attempt in (1, 2):
+                    outgoing = headers_for(provider, dict(request.headers), config.headers, key=upstream_lease.key)
+                    client = httpx.AsyncClient(timeout=config.upstream_timeout_seconds)
+                    try:
+                        upstream = await client.send(client.build_request("POST", url, params=request.query_params, json=sanitized, headers=outgoing), stream=True)
+                    except BaseException:
+                        await client.aclose()
+                        raise
+                    if upstream.status_code < 400:
+                        break
                     try:
                         body = await read_limited(upstream)
                     finally:
                         await upstream.aclose()
                         await client.aclose()
-                        upstream_lease.release()
-                        release()
+                    if attempt == 1 and rejected_key(upstream.status_code, body):
+                        continue
+                    upstream_lease.release()
+                    release()
                     logs.log.error("upstream HTTP %d: %s", upstream.status_code, masked(logs.error_text(body)))
                     return Response(body, status_code=upstream.status_code, headers=response_headers(upstream.headers))
 
@@ -462,8 +485,11 @@ def create_app(config: GatewayConfig, *, admin_token: str | None = None, playgro
                 return StreamingResponse(chained(), status_code=upstream.status_code, headers=response_headers(upstream.headers))
 
             try:
-                response = await upstream_request(provider, path, sanitized, dict(request.headers), config.upstream_timeout_seconds, config.headers,
-                                                  params=request.query_params, key=upstream_lease.key)
+                for attempt in (1, 2):
+                    response = await upstream_request(provider, path, sanitized, dict(request.headers), config.upstream_timeout_seconds, config.headers,
+                                                      params=request.query_params, key=upstream_lease.key)
+                    if not (attempt == 1 and response.status_code >= 400 and rejected_key(response.status_code, response.content)):
+                        break
             finally:
                 upstream_lease.release()
             if response.status_code >= 400:

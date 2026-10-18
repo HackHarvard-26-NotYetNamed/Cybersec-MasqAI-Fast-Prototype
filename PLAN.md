@@ -11,7 +11,7 @@
 | 5 | Freeze: injection set + report, `DECISIONS.md`, README sections | `tests/test_injection.py`; docs written | done |
 | — | Eval harness on Daytona (`eval/`) | self-test smoke passes; `tests/test_eval.py` passes | done; real N=10/N=20 runs pending (needs `DAYTONA_API_KEY`, an upstream key, `qwen2.5:7b`) |
 | — | Public site (`web/`) | `npm run build`, Lighthouse a11y 100 on `/` and `/demo` | done; real `results.json` pending the eval |
-| stretch | Key Enigma (OpenRouter first; design in `KeyEnigma.OpenRouter.doc.md` §12) | `tests/test_enigma.py`, `test_custody.py`, `test_rotation.py` pass per step | in progress: steps 1–3 of 10 done (key leases; fenced OpenRouter key-management client; rotation with drain, fail-closed); owner agreed 2026-10-18 |
+| stretch | Key Enigma (OpenRouter first; design in `KeyEnigma.OpenRouter.doc.md` §12) | `tests/test_enigma.py`, `test_custody.py`, `test_rotation.py`, `test_enigma_policy.py` pass per step | in progress: steps 1–5 of 10 done (key leases; fenced key-management client; rotation; failure policy, emergency rotation, cleanup; masking + status API); ESP32 TLS name check proven; owner agreed 2026-10-18 |
 | stretch | Honeytoken canary (separate module behind a flag) | — | not started |
 
 ## Layout
