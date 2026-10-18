@@ -88,9 +88,6 @@ function ResultsBody({ data }: { data: Results }) {
             <h2 id="per-case" className="text-xl font-semibold">
               Per use case
             </h2>
-            <p className="text-muted-foreground">
-              Each chart is one metric. Hover a bar for exact values; the table below lists them all.
-            </p>
           </div>
           <SeriesLegend />
         </div>
@@ -119,10 +116,6 @@ function ResultsBody({ data }: { data: Results }) {
             <Row k="Date" v={formatDate(data.generatedAt)} />
             <Row k="Use cases" v={String(cases.length)} />
           </dl>
-          <p className="mt-3 text-sm text-muted-foreground">
-            “Raw” sends the same task straight to the untrusted model. “MasqAI” routes it through the local gateway
-            first. A leak is any planted synthetic secret or intel canary seen on the untrusted side during a run.
-          </p>
         </section>
         <section aria-labelledby="honesty" className="rounded-lg border-2 border-foreground/30 bg-card p-5">
           <h2 id="honesty" className="flex items-center gap-2 text-lg font-semibold">
@@ -130,8 +123,7 @@ function ResultsBody({ data }: { data: Results }) {
             Honesty note
           </h2>
           <p className="mt-3 text-lg text-pretty">
-            Lower exposure, not zero. A 7B local model misses things; these numbers are from controlled synthetic
-            scenarios.
+            Lower exposure, not zero: a 7B local model misses things.
           </p>
         </section>
       </div>
@@ -188,8 +180,7 @@ function Injection({ attacks }: { attacks: Results["injection"] }) {
         </p>
       </div>
       <p className="mt-2 max-w-3xl text-muted-foreground">
-        Tool output that tries to talk the security model out of its job. Each bar is the share of attempts where the
-        attack worked.
+        Planted text that tries to talk the security model out of its job. Bar = attacks that worked.
       </p>
       <ul className="mt-4 space-y-3">
         {attacks.map((a) => {

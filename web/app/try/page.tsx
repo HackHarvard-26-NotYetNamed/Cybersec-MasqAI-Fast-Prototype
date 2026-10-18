@@ -9,11 +9,8 @@ export const metadata: Metadata = {
 
 export default function TryPage() {
   return (
-    <div className="mx-auto max-w-7xl space-y-5 px-4 py-6 sm:px-6 sm:py-8">
-      <PageIntro eyebrow="Live playground" title="Try it: nothing leaves this page">
-        Edit the left side, or switch off what you don&apos;t need protected. The right side is what the untrusted
-        model would receive.
-      </PageIntro>
+    <div className="mx-auto max-w-7xl space-y-3 px-4 py-5 sm:px-6">
+      <PageIntro eyebrow="Live playground" title="Try it: nothing leaves this page" />
       <Playground />
     </div>
   );

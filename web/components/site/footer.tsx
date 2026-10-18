@@ -5,8 +5,10 @@ export function SiteFooter() {
     <footer className="border-t">
       <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-5 text-sm text-muted-foreground sm:px-6">
         <p>
-          MasqAI · HackHarvard 2026, cybersecurity track. The gateway runs only on your machine; this site is a static
-          showcase.
+          MasqAI · built by Skyll, Andy, Matthew and Esme at HackHarvard 2026 ·{" "}
+          <a href="https://github.com/HackHarvard-26-NotYetNamed/Cybersec-MasqAI-Fast-Prototype" className="underline underline-offset-4 hover:text-foreground">
+            source
+          </a>
         </p>
         <p
           className="inline-flex items-center gap-2 rounded-full border border-foreground/40 bg-card px-3 py-1 font-mono text-xs font-medium text-foreground"

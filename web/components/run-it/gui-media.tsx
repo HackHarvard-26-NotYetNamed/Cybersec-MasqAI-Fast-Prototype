@@ -3,6 +3,7 @@
 import { ImageOff } from "lucide-react";
 import { MediaSchema, useJson } from "@/lib/data";
 import { DataError, Loading } from "@/components/site/page-bits";
+import { cn } from "@/lib/utils";
 
 /** Screenshots or short loops of the gateway's built-in GUI, listed in /media/media.json. */
 export function GuiMedia() {
@@ -21,7 +22,7 @@ export function GuiMedia() {
       </div>
     );
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
+    <div className={cn("grid gap-4", media.data.items.length > 1 && "lg:grid-cols-2")}>
       {media.data.items.map((item) => (
         <figure key={item.src} className="overflow-hidden rounded-xl border bg-card">
           {item.kind === "video" ? (

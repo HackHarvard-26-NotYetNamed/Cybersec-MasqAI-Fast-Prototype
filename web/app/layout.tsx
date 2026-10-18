@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { SiteHeader } from "@/components/site/header";
 import { SiteFooter } from "@/components/site/footer";
+import { PitchMode } from "@/components/site/pitch-mode";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
 
@@ -14,6 +15,10 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 export const metadata: Metadata = {
   title: { default: "MasqAI: a local context firewall for AI agents", template: "%s · MasqAI" },
   description: "Your LLM key is a two-way mirror. MasqAI makes it one-way. A local context firewall for AI coding agents.",
+  // Absolute URLs for the social card (app/opengraph-image.tsx).
+  metadataBase: new URL("https://masqai.vercel.app"),
+  openGraph: { type: "website", siteName: "MasqAI", url: "/" },
+  twitter: { card: "summary_large_image" },
 };
 
 // Dark by default; a saved "light" choice is applied before paint to avoid a flash.
@@ -42,6 +47,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             {children}
           </main>
           <SiteFooter />
+          <PitchMode />
         </TooltipProvider>
       </body>
     </html>

@@ -1,294 +1,152 @@
 import Link from "next/link";
-import {
-  ArrowRight,
-  Ban,
-  Binary,
-  Boxes,
-  BrainCircuit,
-  Check,
-  Copy,
-  Fingerprint,
-  ShieldX,
-  SlidersHorizontal,
-  Sparkles,
-  WifiOff,
-  FolderTree,
-  KeyRound,
-  RotateCcw,
-  ScanSearch,
-  ShieldCheck,
-  Telescope,
-  UserRound,
-} from "lucide-react";
+import { ArrowRight, Boxes, Check, KeyRound, ScanSearch, ShieldCheck, SlidersHorizontal, Sparkles, Telescope } from "lucide-react";
+import { DaytonaRuns } from "@/components/landing/daytona-runs";
+import { LeakStrip } from "@/components/landing/leak-strip";
 import { MirrorHero } from "@/components/landing/mirror";
+import { PipelineFlow } from "@/components/landing/pipeline-flow";
 import rules from "@/lib/detector-rules.json";
 
+/*
+ * The home page follows the pitch script top to bottom:
+ *   Skyll   → hero: the leak in three beats, then the mirror (what an agent sends vs. what it should)
+ *   Matthew → /try and /demo (their own pages)
+ *   Andy    → "Every request, inspected before it leaves": the animated pipeline
+ *   Esme    → "MasqAI protects the context. Daytona contains the actions.": the 30 runs
+ * Everything below Esme's section is for judges browsing afterwards.
+ */
 export default function Home() {
   return (
     <>
       <section className="bg-grid border-b">
-        <div className="mx-auto max-w-7xl px-4 pt-12 pb-14 sm:px-6 sm:pt-16">
-          <p className="font-mono text-sm tracking-wide text-muted-foreground uppercase">
-            Local context firewall for AI agents
-          </p>
-          <h1 className="mt-3 max-w-4xl text-4xl font-semibold tracking-tight text-balance sm:text-6xl">
+        <div className="mx-auto max-w-7xl px-4 pt-10 pb-12 sm:px-6 sm:pt-14">
+          <h1 className="max-w-4xl text-4xl font-semibold tracking-tight text-balance sm:text-6xl">
             Your LLM key is a two-way mirror. <span className="text-restored">MasqAI makes it one-way.</span>
           </h1>
-          <p className="mt-5 max-w-2xl text-lg text-pretty text-muted-foreground">
-            MasqAI runs on your own machine. A trusted security model inspects every request inline, before anything
-            reaches the untrusted model: secrets are masked, intel is hidden or replaced, and real values are swapped
-            back in locally when a tool call needs them.
-          </p>
-          <div className="mt-7 flex flex-wrap gap-3">
-            <Link
-              href="/try"
-              className="inline-flex min-h-11 items-center gap-2 rounded-md bg-primary px-5 font-medium text-primary-foreground hover:bg-primary/85"
-            >
-              Try it live <ArrowRight aria-hidden className="size-4" />
-            </Link>
-            <Link
-              href="/demo"
-              className="inline-flex min-h-11 items-center gap-2 rounded-md border bg-card px-5 font-medium hover:bg-accent"
-            >
-              Watch the replays
-            </Link>
-            <Link
-              href="/results"
-              className="inline-flex min-h-11 items-center gap-2 rounded-md border bg-card px-5 font-medium hover:bg-accent"
-            >
-              See the numbers
-            </Link>
+          <div className="mt-7">
+            <LeakStrip />
           </div>
-          <div className="mt-10">
+          <div className="mt-8">
             <MirrorHero />
           </div>
-        </div>
-      </section>
-
-      <section aria-labelledby="origin" className="mx-auto max-w-7xl px-4 py-14 sm:px-6">
-        <div className="grid gap-8 lg:grid-cols-[1fr_1.2fr]">
-          <div>
-            <p className="font-mono text-sm tracking-wide text-muted-foreground uppercase">Why this exists</p>
-            <h2 id="origin" className="mt-2 text-3xl font-semibold tracking-tight text-balance">
-              Our own key leaked. We saw what an endpoint operator can see.
-            </h2>
-          </div>
-          <div className="space-y-4 text-lg text-pretty text-muted-foreground">
-            <p>
-              People treat an API key as a billing token. It is really a channel: whoever operates the endpoint
-              behind it reads everything sent through it. Coding agents send a lot, and most of it is not code.
-            </p>
-            <ul className="space-y-3 text-foreground">
-              <li className="flex gap-3">
-                <Fingerprint aria-hidden className="mt-1 size-5 shrink-0 text-ent-host" />
-                <span>
-                  <strong className="font-semibold">Machine fingerprints</strong>: OS, hardware and host names, pasted
-                  in from diagnostic commands.
-                </span>
-              </li>
-              <li className="flex gap-3">
-                <FolderTree aria-hidden className="mt-1 size-5 shrink-0 text-ent-path" />
-                <span>
-                  <strong className="font-semibold">Internal details</strong>: the filesystem path to a production
-                  database, internal host names, keys in config files.
-                </span>
-              </li>
-              <li className="flex gap-3">
-                <UserRound aria-hidden className="mt-1 size-5 shrink-0 text-ent-user" />
-                <span>
-                  <strong className="font-semibold">Personal identities</strong>: usernames, emails and chat handles
-                  from git history and configs.
-                </span>
-              </li>
-            </ul>
-            <p className="text-base">
-              We publish no third-party data. Every value on this site comes from our synthetic playground.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <section aria-labelledby="secret-intel" className="border-t bg-card/50">
-        <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6">
-          <h2 id="secret-intel" className="text-3xl font-semibold tracking-tight">
-            Secret vs. intel
-          </h2>
-          <p className="mt-2 max-w-3xl text-lg text-muted-foreground">
-            Ordinary data-loss tools catch secrets. MasqAI also stops intel.
-          </p>
-          <div className="mt-8 grid gap-4 md:grid-cols-2">
-            <Kind
-              icon={<KeyRound aria-hidden className="size-5 text-leak" />}
-              title="Secret"
-              definition="A concrete string that unlocks or identifies something."
-              handling="Masked: reversible, restored in tool calls."
-              examples={[
-                ["sk-or-v1-FAKEFAKE5e2b…", "an API key"],
-                ["C:\\Users\\alice\\…\\prod\\inventory.db", "a path to private data"],
-                ["DESKTOP-7Q2XK9M", "a device name"],
-              ]}
-            />
-            <Kind
-              icon={<Telescope aria-hidden className="size-5 text-replaced" />}
-              title="Intel"
-              definition="Something the endpoint could conclude about you."
-              handling="Hidden or replaced: lossy, never restored."
-              examples={[
-                ["“a short walk from Davis Square”", "where someone lives"],
-                ["an env dump with every drive and tool", "the shape of your machine"],
-                ["the agenda of an unreleased design doc", "what your team is building"],
-              ]}
-            />
-          </div>
-        </div>
-      </section>
-
-      <section aria-labelledby="threats" className="border-y bg-card/50">
-        <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6">
-          <h2 id="threats" className="text-3xl font-semibold tracking-tight">
-            Two assets, two threats
-          </h2>
-          <div className="mt-8 grid gap-4 md:grid-cols-2">
-            <ThreatCard
-              icon={<KeyRound aria-hidden className="size-6 text-ent-key" />}
-              asset="The key"
-              threat="Whoever obtains it: a leak, a shared team key, a borrowed key."
-              defense="Key Enigma"
-              defenseText="Rotates the upstream key continuously, so a leaked key dies within minutes. Canary keys catch a relay that reuses your traffic."
-              status="In progress"
-              href="/trust"
-            />
-            <ThreatCard
-              icon={<ScanSearch aria-hidden className="size-6 text-ent-path" />}
-              asset="The context"
-              threat="Whoever operates the endpoint: a provider, a cheap reseller, a relay, an opaque agent app."
-              defense="The sanitizer"
-              defenseText="Detectors and a local security model mask secrets and hide or replace intel before anything reaches the untrusted model, then restore real values in tool calls."
-              status="Working, tested on real agent runs"
-              href="/how-it-works"
-            />
+          <div className="mt-6 flex flex-wrap gap-3">
+            <Link href="/try" className="inline-flex min-h-11 items-center gap-2 rounded-md bg-primary px-5 font-medium text-primary-foreground hover:bg-primary/85">
+              Try it live <ArrowRight aria-hidden className="size-4" />
+            </Link>
+            <Link href="/demo" className="inline-flex min-h-11 items-center gap-2 rounded-md border bg-card px-5 font-medium hover:bg-accent">
+              Watch the replays
+            </Link>
           </div>
         </div>
       </section>
 
       <section aria-labelledby="pipeline" className="mx-auto max-w-7xl px-4 py-14 sm:px-6">
-        <h2 id="pipeline" className="text-3xl font-semibold tracking-tight">
+        <Heading id="pipeline" eyebrow="How it works">
           Every request, inspected before it leaves
-        </h2>
-        <ol className="mt-8 grid gap-4 md:grid-cols-2 lg:grid-cols-5">
-          <Step n={1} icon={<Binary aria-hidden className="size-5" />} title="Detectors">
-            Rule tables for keys, PEM blocks, emails, cloud tokens, passwords and host identifiers. Fast, can’t be
-            prompt-injected, and they only ever mask.
-          </Step>
-          <Step n={2} icon={<Copy aria-hidden className="size-5" />} title="Auto masks">
-            Every exact copy of a known value is masked too, but never inside a longer word: with username{" "}
-            <code className="font-mono">andy</code>, “handy” is left for the security model to judge.
-          </Step>
-          <Step n={3} icon={<BrainCircuit aria-hidden className="size-5" />} title="Security model">
-            Adds the masks the rules missed, vetoes wrong auto masks, links partial forms, and hides or replaces intel in
-            tool results.
-          </Step>
-          <Step n={4} icon={<ShieldX aria-hidden className="size-5" />} title="Check tool calls">
-            A tool call that would send a secret off your machine is rejected: it becomes a harmless{" "}
-            <code className="font-mono">echo</code> the untrusted model reads, or an HTTP 400.
-          </Step>
-          <Step n={5} icon={<RotateCcw aria-hidden className="size-5" />} title="Restore">
-            In tool-call arguments only, placeholders become real values again, locally. The untrusted model’s text is
-            never modified.
-          </Step>
-        </ol>
-        <p className="mt-6 flex items-start gap-3 rounded-lg border border-leak/40 bg-leak/6 p-4 text-pretty">
-          <Ban aria-hidden className="mt-0.5 size-5 shrink-0 text-leak" />
-          <span>
-            <strong className="font-semibold">Fails closed.</strong> Security model down or answering nonsense: 502.
-            Content it can’t inspect: 422. Unsupported endpoint: 404. A tool call it can’t clear: rejected. Nothing is
-            ever sent raw.
-          </span>
-        </p>
-        <div className="mt-8 flex flex-wrap gap-3">
-          <Link
-            href="/demo"
-            className="inline-flex min-h-11 items-center gap-2 rounded-md bg-primary px-5 font-medium text-primary-foreground hover:bg-primary/85"
-          >
-            See it on eight tasks <ArrowRight aria-hidden className="size-4" />
-          </Link>
-          <Link
-            href="/results"
-            className="inline-flex min-h-11 items-center gap-2 rounded-md border bg-card px-5 font-medium hover:bg-accent"
-          >
-            See the numbers
-          </Link>
+        </Heading>
+        <div className="mt-6">
+          <PipelineFlow />
         </div>
       </section>
 
-      <section aria-labelledby="choose" className="border-t bg-card/50">
-        <div className="mx-auto grid max-w-7xl gap-8 px-4 py-14 sm:px-6 lg:grid-cols-[1fr_1.3fr]">
+      <section aria-labelledby="daytona" className="border-t bg-card/40">
+        <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6">
+          <Heading id="daytona" eyebrow="Measured in Daytona sandboxes" icon={<Boxes aria-hidden className="size-4" />}>
+            MasqAI protects the context. Daytona contains the actions.
+          </Heading>
+          <div className="mt-6">
+            <DaytonaRuns />
+          </div>
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-4">
+            <div className="flex flex-wrap gap-3">
+              <Link href="/results" className="inline-flex min-h-11 items-center gap-2 rounded-md border bg-card px-5 font-medium hover:bg-accent">
+                See the numbers <ArrowRight aria-hidden className="size-4" />
+              </Link>
+              <Link href="/how-it-works#daytona-title" className="inline-flex min-h-11 items-center gap-2 rounded-md border bg-card px-5 font-medium hover:bg-accent">
+                How we use Daytona
+              </Link>
+            </div>
+            {/* The close of the pitch: "try it right now on our site". */}
+            <Link href="/try" className="flex items-center gap-4 rounded-xl border bg-card p-3 pr-5 hover:bg-accent/40">
+              {/* eslint-disable-next-line @next/next/no-img-element -- a static SVG, scaled crisp */}
+              <img src="/qr-try.svg" alt="QR code for masqai.vercel.app/try" width={104} height={104} className="rounded-md" />
+              <span>
+                <span className="block text-lg font-semibold">Try it now</span>
+                <span className="font-mono text-sm text-muted-foreground">masqai.vercel.app/try</span>
+              </span>
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      <section aria-labelledby="choose" className="border-t">
+        <div className="mx-auto grid max-w-7xl gap-6 px-4 py-14 sm:px-6 lg:grid-cols-[1fr_1.4fr] lg:items-center">
           <div>
-            <p className="flex items-center gap-2 font-mono text-sm tracking-wide text-muted-foreground uppercase">
-              <SlidersHorizontal aria-hidden className="size-4" /> Your rules, not a preset
-            </p>
-            <h2 id="choose" className="mt-2 text-3xl font-semibold tracking-tight text-balance">
+            <Heading id="choose" eyebrow="Your rules, not a preset" icon={<SlidersHorizontal aria-hidden className="size-4" />}>
               You decide what counts as secret
-            </h2>
-            <p className="mt-3 text-lg text-pretty text-muted-foreground">
-              Switch categories on or off in the gateway&apos;s settings. It&apos;s enforced in code, not just asked of the
-              model: detectors skip what you switched off, and anything the model still proposes for it is ignored.
-            </p>
+            </Heading>
             <Link href="/try" className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-md bg-primary px-5 font-medium text-primary-foreground hover:bg-primary/85">
               Try the switches <ArrowRight aria-hidden className="size-4" />
             </Link>
           </div>
-          <div className="space-y-4">
+          <div className="space-y-3">
             {(["secret", "intel"] as const).map((kind) => (
-              <div key={kind} className="rounded-xl border bg-card p-5">
-                <p className="font-semibold">
-                  {kind === "secret" ? "Secrets" : "Intel"}{" "}
-                  <span className="font-normal text-muted-foreground">
-                    {kind === "secret" ? "masked, restored in your tool calls" : "hidden or replaced by the security model"}
-                  </span>
-                </p>
-                <ul className="mt-3 flex flex-wrap gap-2">
-                  {rules.categories.filter((c) => c.kind === kind).map((c) => (
-                    <li key={c.id} title={c.description} className="inline-flex items-center gap-1.5 rounded-full border border-restored/50 bg-restored/10 px-3 py-1 text-sm">
-                      {kind === "secret" ? <Check aria-hidden className="size-3.5 text-restored" /> : <Sparkles aria-hidden className="size-3.5 text-model" />}
-                      {c.label}
-                    </li>
-                  ))}
-                </ul>
-              </div>
+              <ul key={kind} aria-label={kind === "secret" ? "Secrets, masked" : "Intel, hidden or replaced"} className="flex flex-wrap gap-2">
+                {rules.categories.filter((c) => c.kind === kind).map((c) => (
+                  <li key={c.id} title={c.description} className="inline-flex items-center gap-1.5 rounded-full border border-restored/50 bg-restored/10 px-3.5 py-1.5">
+                    {kind === "secret" ? <Check aria-hidden className="size-4 text-restored" /> : <Sparkles aria-hidden className="size-4 text-model" />}
+                    {c.label}
+                  </li>
+                ))}
+              </ul>
             ))}
           </div>
         </div>
       </section>
 
-      <section aria-labelledby="daytona" className="border-t">
-        <div className="mx-auto grid max-w-7xl gap-8 px-4 py-14 sm:px-6 lg:grid-cols-[1.2fr_1fr]">
-          <div>
-            <p className="flex items-center gap-2 font-mono text-sm tracking-wide text-muted-foreground uppercase">
-              <Boxes aria-hidden className="size-4" /> Measured, in Daytona sandboxes
-            </p>
-            <h2 id="daytona" className="mt-2 text-3xl font-semibold tracking-tight text-balance">
-              MasqAI protects the context. Daytona contains the actions.
-            </h2>
-            <p className="mt-3 text-lg text-pretty text-muted-foreground">
-              Our eval runs a real agent on six coding tasks with planted secrets. Every command it runs executes in a
-              fresh Daytona sandbox with its network blocked, and is deleted afterwards. We count what reaches the
-              untrusted model, with and without MasqAI.
-            </p>
-            <div className="mt-5 flex flex-wrap gap-3">
-              <Link href="/how-it-works#daytona-title" className="inline-flex min-h-11 items-center gap-2 rounded-md border bg-card px-5 font-medium hover:bg-accent">
-                How we use Daytona <ArrowRight aria-hidden className="size-4" />
-              </Link>
-              <Link href="/results" className="inline-flex min-h-11 items-center gap-2 rounded-md border bg-card px-5 font-medium hover:bg-accent">
-                See the numbers
-              </Link>
-            </div>
-          </div>
-          <div className="grid content-start gap-3 sm:grid-cols-2">
-            <Stat value="29 / 30" label="runs leaked a planted secret without MasqAI" tone="text-leak" />
-            <Stat value="30 / 30" label="tasks still succeeded: the leak is silent" tone="text-foreground" />
-            <Stat value="0" label="leftover sandboxes: each is deleted, then a label sweep checks" tone="text-restored" />
-            <Stat icon={<WifiOff aria-hidden className="size-5" />} value="Blocked" label="outbound network in every sandbox, verified live" tone="text-restored" />
+      <section aria-labelledby="secret-intel" className="border-t bg-card/40">
+        <div className="mx-auto grid max-w-7xl gap-4 px-4 py-14 sm:px-6 md:grid-cols-2">
+          <h2 id="secret-intel" className="text-3xl font-semibold tracking-tight md:col-span-2 sm:text-4xl">
+            Secrets are masked. Intel is hidden.
+          </h2>
+          <Kind
+            icon={<KeyRound aria-hidden className="size-5 text-leak" />}
+            title="Secret"
+            handling="masked · restored in tool calls"
+            examples={["sk-or-v1-FAKEFAKE5e2b…", "C:\\Users\\alice\\…\\inventory.db", "DESKTOP-7Q2XK9M"]}
+          />
+          <Kind
+            icon={<Telescope aria-hidden className="size-5 text-replaced" />}
+            title="Intel"
+            handling="hidden or replaced · never restored"
+            examples={["“a short walk from Davis Square”", "an env dump with every drive and tool", "an unreleased design doc"]}
+          />
+        </div>
+      </section>
+
+      <section aria-labelledby="threats" className="border-t">
+        <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6">
+          <Heading id="threats" eyebrow="Two assets, two defenses">
+            The key and the context
+          </Heading>
+          <div className="mt-6 grid gap-4 md:grid-cols-2">
+            <Threat
+              icon={<KeyRound aria-hidden className="size-6 text-ent-key" />}
+              asset="The key"
+              threat="whoever obtains it"
+              defense="Key Enigma"
+              text="Rotates your provider key on a timer, so a leaked key dies fast."
+              status="In progress"
+              href="/trust"
+            />
+            <Threat
+              icon={<ScanSearch aria-hidden className="size-6 text-ent-path" />}
+              asset="The context"
+              threat="whoever runs the endpoint"
+              defense="The sanitizer"
+              text="Masks secrets and strips intel before anything leaves; restores real values locally."
+              status="Working"
+              href="/how-it-works"
+            />
           </div>
         </div>
       </section>
@@ -296,85 +154,34 @@ export default function Home() {
   );
 }
 
-function Stat({ value, label, tone, icon }: { value: string; label: string; tone: string; icon?: React.ReactNode }) {
+function Heading({ id, eyebrow, icon, children }: { id: string; eyebrow: string; icon?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border bg-card p-5">
-      <p className={`flex items-center gap-2 font-mono text-3xl font-semibold ${tone}`}>
+    <div>
+      <p className="flex items-center gap-2 font-mono text-sm tracking-wide text-muted-foreground uppercase">
         {icon}
-        {value}
+        {eyebrow}
       </p>
-      <p className="mt-1 text-sm text-pretty text-muted-foreground">{label}</p>
+      <h2 id={id} className="mt-2 text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
+        {children}
+      </h2>
     </div>
   );
 }
 
-function ThreatCard({
-  icon,
-  asset,
-  threat,
-  defense,
-  defenseText,
-  status,
-  href,
-}: {
-  icon: React.ReactNode;
-  asset: string;
-  threat: string;
-  defense: string;
-  defenseText: string;
-  status: string;
-  href: string;
-}) {
+function Kind({ icon, title, handling, examples }: { icon: React.ReactNode; title: string; handling: string; examples: string[] }) {
   return (
-    <article className="flex flex-col rounded-xl border bg-card p-6">
-      <div className="flex items-center gap-3">
-        {icon}
-        <h3 className="text-xl font-semibold">{asset}</h3>
-      </div>
-      <p className="mt-4 text-sm font-medium text-muted-foreground uppercase">Threat</p>
-      <p className="mt-1 text-lg">{threat}</p>
-      <p className="mt-4 flex flex-wrap items-center gap-2 text-sm font-medium text-muted-foreground uppercase">
-        Defense
-        <span className="rounded-full border px-2 py-0.5 font-mono text-xs normal-case">{status}</span>
-      </p>
-      <p className="mt-1 flex items-center gap-2 text-lg font-semibold">
-        <ShieldCheck aria-hidden className="size-5 text-restored" />
-        {defense}
-      </p>
-      <p className="mt-1 flex-1 text-muted-foreground">{defenseText}</p>
-      <Link href={href} className="mt-4 inline-flex items-center gap-1 font-medium underline-offset-4 hover:underline">
-        More on {defense.replace(/^The /, "the ")} <ArrowRight aria-hidden className="size-4" />
-      </Link>
-    </article>
-  );
-}
-
-function Kind({
-  icon,
-  title,
-  definition,
-  handling,
-  examples,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  definition: string;
-  handling: string;
-  examples: [string, string][];
-}) {
-  return (
-    <article className="rounded-xl border bg-card p-6">
-      <h3 className="flex items-center gap-3 text-xl font-semibold">
-        {icon}
-        {title}
+    <article className="rounded-xl border bg-card p-5">
+      <h3 className="flex flex-wrap items-baseline gap-x-3 text-xl font-semibold">
+        <span className="inline-flex items-center gap-2">
+          {icon}
+          {title}
+        </span>
+        <span className="text-sm font-normal text-muted-foreground">{handling}</span>
       </h3>
-      <p className="mt-2 text-lg">{definition}</p>
-      <p className="mt-1 text-muted-foreground">{handling}</p>
       <ul className="mt-4 space-y-2">
-        {examples.map(([example, meaning]) => (
-          <li key={example} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 rounded-md border bg-background px-3 py-2">
-            <code className="font-mono text-[15px] break-all">{example}</code>
-            <span className="text-sm text-muted-foreground">{meaning}</span>
+        {examples.map((example) => (
+          <li key={example} className="rounded-md border bg-background px-3 py-2 font-mono text-[15px] break-all">
+            {example}
           </li>
         ))}
       </ul>
@@ -382,15 +189,31 @@ function Kind({
   );
 }
 
-function Step({ n, icon, title, children }: { n: number; icon: React.ReactNode; title: string; children: React.ReactNode }) {
+function Threat({ icon, asset, threat, defense, text, status, href }: {
+  icon: React.ReactNode;
+  asset: string;
+  threat: string;
+  defense: string;
+  text: string;
+  status: string;
+  href: string;
+}) {
   return (
-    <li className="rounded-xl border bg-card p-5">
-      <p className="flex items-center gap-2 font-semibold">
-        <span className="grid size-7 place-items-center rounded-full border font-mono text-sm">{n}</span>
+    <Link href={href} className="group flex flex-col rounded-xl border bg-card p-5 hover:bg-accent/40">
+      <p className="flex items-center gap-3 text-xl font-semibold">
         {icon}
-        {title}
+        {asset}
+        <span className="text-base font-normal text-muted-foreground">· threat: {threat}</span>
       </p>
-      <p className="mt-3 text-pretty text-muted-foreground">{children}</p>
-    </li>
+      <p className="mt-4 flex items-center gap-2 text-lg font-semibold">
+        <ShieldCheck aria-hidden className="size-5 text-restored" />
+        {defense}
+        <span className="rounded-full border px-2 py-0.5 font-mono text-xs font-normal">{status}</span>
+      </p>
+      <p className="mt-1 text-muted-foreground">{text}</p>
+      <span className="mt-3 inline-flex items-center gap-1 font-medium group-hover:underline">
+        More <ArrowRight aria-hidden className="size-4" />
+      </span>
+    </Link>
   );
 }

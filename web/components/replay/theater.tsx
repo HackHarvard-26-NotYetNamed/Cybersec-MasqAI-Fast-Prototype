@@ -46,7 +46,8 @@ export function ReplayTheater() {
   if (index.status === "error") return <DataError url={index.url} message={index.message} />;
 
   const replays = index.data;
-  const current = replays.find((r) => r.id === picked) ?? replays[0];
+  // Without a #hash, open UC2: the replay the pitch script talks over.
+  const current = replays.find((r) => r.id === picked) ?? replays.find((r) => r.id === "uc2-db-path") ?? replays[0];
   const pick = (id: string) => {
     setPicked(id);
     history.replaceState(null, "", `#${id}`);
@@ -132,8 +133,12 @@ function caption(step: Step, unprotected: boolean): string {
 function Player({ replay }: { replay: Replay }) {
   const index = useMemo(() => indexReplay(replay), [replay]);
   const last = replay.steps.length - 1;
+  const reduce = useReducedMotion();
   const [i, setI] = useState(0);
-  const [playing, setPlaying] = useState(false);
+  // Auto mode: plays on its own, flips to "Without MasqAI" at the end to show the contrast, then loops.
+  // Any key or control press hands over to manual.
+  const [auto, setAuto] = useState(true);
+  const [playing, setPlaying] = useState(!reduce);
   const [unprotected, setUnprotected] = useState(false);
   const [mobilePane, setMobilePane] = useState<"agent" | "untrusted">("untrusted");
   // A relink jumps the untrusted pane back to the first rewritten step, then returns.
@@ -150,6 +155,21 @@ function Player({ replay }: { replay: Replay }) {
   }, [playing, i, last, replay]);
 
   useEffect(() => {
+    if (!auto || reduce || playing || i < last) return;
+    const flip = setTimeout(() => setUnprotected(true), 2500);
+    const back = setTimeout(() => setUnprotected(false), 8500);
+    const again = setTimeout(() => {
+      setI(0);
+      setPlaying(true);
+    }, 10500);
+    return () => {
+      clearTimeout(flip);
+      clearTimeout(back);
+      clearTimeout(again);
+    };
+  }, [auto, reduce, playing, i, last]);
+
+  useEffect(() => {
     const rewritten = replay.steps[i].relinks.flatMap((r) => r.stepsRewritten).filter((s) => s < i);
     if (!rewritten.length) return;
     const jump = setTimeout(() => setRelinkFocus(Math.min(...rewritten)), 350);
@@ -162,10 +182,12 @@ function Player({ replay }: { replay: Replay }) {
   }, [i, replay]);
 
   const go = (n: number) => {
+    setAuto(false);
     setPlaying(false);
     setI(Math.max(0, Math.min(last, n)));
   };
   const togglePlay = () => {
+    setAuto(false);
     if (playing) return setPlaying(false);
     if (i >= last) setI(0);
     setPlaying(true);
@@ -205,7 +227,7 @@ function Player({ replay }: { replay: Replay }) {
             </h2>
             <p className="mt-0.5 text-pretty text-muted-foreground">{replay.summary}</p>
           </div>
-          <UnprotectedSwitch on={unprotected} onChange={setUnprotected} />
+          <UnprotectedSwitch on={unprotected} onChange={(v) => { setAuto(false); setUnprotected(v); }} />
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
           <ControlButton label={playing ? "Pause (space)" : "Play (space)"} onClick={togglePlay} primary>
@@ -224,6 +246,12 @@ function Player({ replay }: { replay: Replay }) {
           <span className="font-mono text-sm text-muted-foreground tabular-nums">
             Step {i + 1} / {replay.steps.length}
           </span>
+          {auto && !reduce ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-restored/50 bg-restored/10 px-2.5 py-0.5 text-sm text-restored">
+              <span aria-hidden className="size-2 animate-pulse rounded-full bg-restored" />
+              Auto-playing
+            </span>
+          ) : null}
           <span className="ml-auto hidden text-sm text-muted-foreground md:inline">
             Keys: <kbd className="rounded border px-1 font-mono">←</kbd> <kbd className="rounded border px-1 font-mono">→</kbd>{" "}
             <kbd className="rounded border px-1 font-mono">space</kbd>

@@ -2,7 +2,7 @@
 // Pages: ContextPage (context.js), SecurityPage (security.js), MappingPage (mapping.js), ConfigPanel (config.js).
 const App = (() => {
   const $ = (id) => document.getElementById(id);
-  const state = { sessions: [], details: new Map(), traces: [], config: null, forwarded: 0 };
+  const state = { sessions: [], details: new Map(), traces: [], config: null, forwarded: 0, rejected: 0 };
   let tab = "context";
 
   const renderContext = UI.throttle(() => { if (tab === "context") ContextPage.render(); });
@@ -20,6 +20,23 @@ const App = (() => {
     el.title = `${state.traces.length} recent passes${blocked ? `, ${blocked} blocked` : ""}`;
     const detail = state.details.get(ContextPage.selectedId());
     $("countMapping").textContent = detail ? String(detail.entities.length) : "0";
+    // The live flow strip in the top bar.
+    $("flowSent").textContent = String(state.forwarded);
+    $("flowMasked").textContent = String(state.sessions.reduce((n, s) => n + (s.entities || 0), 0));
+    $("flowBlocked").textContent = String(blocked);
+    $("flowBlocked").classList.toggle("hot", blocked > 0);
+    $("flowRejected").textContent = String(state.rejected);
+    $("flowRejected").classList.toggle("hot", state.rejected > 0);
+  }
+
+  // Restart a CSS animation on a wire: `go` (out to the model) or `back` (a rejected tool call).
+  function pulse(id, kind, delay = 0) {
+    setTimeout(() => {
+      const wire = $(id);
+      wire.classList.remove("go", "back");
+      void wire.offsetWidth;
+      wire.classList.add(kind);
+    }, delay);
   }
 
   // ---------- data ----------
@@ -76,8 +93,17 @@ const App = (() => {
       state.config = data.config;
     } else if (data.type === "warning") {
       notify(data.message, "warn");
+      if (/^tool call .* rejected/.test(data.message || "")) {
+        state.rejected += 1;
+        pulse("wireUp", "back");
+        const flow = $("flow");
+        flow.classList.add("rejected");
+        setTimeout(() => flow.classList.remove("rejected"), 1600);
+      }
     } else if (data.type === "forwarded") {
       state.forwarded += 1;
+      pulse("wireOut", "go");
+      pulse("wireUp", "go", 450);
     }
     counts();
     renderAll();
