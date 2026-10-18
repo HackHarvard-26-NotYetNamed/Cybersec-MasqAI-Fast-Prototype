@@ -145,6 +145,7 @@ class LanDeployment(unittest.TestCase):
         from pathlib import Path
         source = (Path(__file__).parents[1] / "firmware" / "esp32" / "lan_app.py").read_text()
         self.assertIn('"/enigma/lan_enroll"', source)
+        self.assertIn('"/enigma/lan_enroll.bin"', source)
         self.assertIn('display.text(str(line)[:21]', source)
         self.assertIn('Board(wdt=True', source)
         self.assertIn('TcpLink(7777)', source)

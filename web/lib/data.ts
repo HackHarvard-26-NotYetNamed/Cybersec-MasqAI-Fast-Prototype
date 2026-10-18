@@ -99,6 +99,29 @@ export const MetricsSchema = z.object({
   p50LatencyMs: z.number().nonnegative(),
 });
 
+export const ConditionSchema = z.object({
+  id: z.string(),
+  kind: z.enum(["raw", "masqai"]),
+  label: z.string(),
+  untrusted: z.string().optional(),
+  security: z.object({ model: z.string().optional(), provider: z.string().optional(), think: z.boolean().optional() }).nullable().optional(),
+});
+
+export const ConditionMetricsSchema = MetricsSchema.extend({
+  runs: z.number().int().nonnegative().optional(),
+  blocked: z.number().int().nonnegative().optional(),
+  expectedBlocks: z.number().int().nonnegative().optional(),
+  toolCallsVetoed: z.number().int().nonnegative().optional(),
+  examples: z.array(z.object({
+    status: z.enum(["ok", "fail", "leak", "blocked"]),
+    taskOk: z.boolean(),
+    blocked: z.boolean(),
+    leaked: z.boolean(),
+    latencyMs: z.number().nonnegative().nullable().optional(),
+    tokens: z.number().nonnegative(),
+  })).optional(),
+});
+
 export const ResultsSchema = z.object({
   placeholder: z.boolean().optional().default(false),
   generatedAt: z.string(),
@@ -107,8 +130,15 @@ export const ResultsSchema = z.object({
   untrustedModel: z.string(),
   agent: z.string(),
   sandbox: z.string(),
+  conditions: z.array(ConditionSchema).default([]),
   cases: z
-    .array(z.object({ id: z.string(), title: z.string(), raw: MetricsSchema, masqai: MetricsSchema }))
+    .array(z.object({
+      id: z.string(),
+      title: z.string(),
+      raw: MetricsSchema.optional(),
+      masqai: MetricsSchema.optional(),
+      conditions: z.record(z.string(), ConditionMetricsSchema).default({}),
+    }))
     .min(1),
   injection: z
     .array(
@@ -120,6 +150,8 @@ export const ResultsSchema = z.object({
 });
 
 export type Metrics = z.infer<typeof MetricsSchema>;
+export type Condition = z.infer<typeof ConditionSchema>;
+export type ConditionMetrics = z.infer<typeof ConditionMetricsSchema>;
 export type Results = z.infer<typeof ResultsSchema>;
 
 // ---------- keys ----------

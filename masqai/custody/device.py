@@ -233,8 +233,7 @@ class TcpTransport:
             try:
                 chunk = sock.recv(4096)
             except socket.timeout:
-                self.reset()
-                raise BackendUnavailable("the LAN device did not answer before the command timeout") from None
+                continue
             except OSError:
                 self.reset()
                 raise BackendUnavailable("lost the connection to the LAN device") from None

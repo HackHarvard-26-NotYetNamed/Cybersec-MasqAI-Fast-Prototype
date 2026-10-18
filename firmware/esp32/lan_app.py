@@ -21,10 +21,15 @@ from enigma_dev.hw import Board, TcpLink, serve
 
 class LanBoard(Board):
     def _button_held(self):
-        marker = "/enigma/lan_enroll.bin"
-        try:
-            os.stat(marker)
-        except OSError:
+        marker = None
+        for candidate in ("/enigma/lan_enroll", "/enigma/lan_enroll.bin"):
+            try:
+                os.stat(candidate)
+                marker = candidate
+                break
+            except OSError:
+                pass
+        if marker is None:
             return False
         os.remove(marker)
         self.show("PAIRING", ["owner opened via OTA", "120 seconds"])

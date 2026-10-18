@@ -37,7 +37,15 @@ def metrics(runs: list[dict[str, Any]]) -> dict[str, float]:
 def extras(runs: list[dict[str, Any]]) -> dict[str, int]:
     return {"runs": len(runs), "blocked": sum(bool(r["blocked"]) for r in runs),
             "expectedBlocks": sum(bool(r.get("expected_block_met")) for r in runs),
-            "toolCallsVetoed": sum(r.get("tool_calls_blocked", 0) for r in runs)}
+             "toolCallsVetoed": sum(r.get("tool_calls_blocked", 0) for r in runs)}
+
+
+def examples(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep a few non-sensitive outcomes for the site's focused result cells."""
+    return [{"status": "blocked" if r.get("blocked") else ("leak" if r.get("leaked_count", 0) else ("ok" if r.get("task_ok") else "fail")),
+             "taskOk": bool(r.get("task_ok")), "blocked": bool(r.get("blocked")),
+             "leaked": bool(r.get("leaked_count", 0)), "latencyMs": r.get("llm_ms_p50"),
+             "tokens": r.get("prompt_tokens", 0)} for r in runs[:3]]
 
 
 def measured(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -79,7 +87,7 @@ def aggregate(rows: list[dict[str, Any]], meta: dict[str, Any], injection: list[
     for case_id in sorted({r["case"] for r in rows}):
         by = {c["id"]: [r for r in rows if r["case"] == case_id and r["condition"] == c["id"]] for c in conditions}
         entry: dict[str, Any] = {"id": case_id, "title": titles.get(case_id, case_id),
-                                 "conditions": {cid: {**metrics(runs), **extras(runs)} for cid, runs in by.items() if runs}}
+                                 "conditions": {cid: {**metrics(runs), **extras(runs), "examples": examples(runs)} for cid, runs in by.items() if runs}}
         for kind, cid in first.items():
             if cid and by.get(cid):
                 entry[kind] = metrics(by[cid])

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "masqai/google/gemini-3.8-flash",
+  "small_model": "masqai/google/gemini-3.8-flash",
+  "provider": {
+    "masqai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "MasqAI local gateway",
+      "options": {
+        "baseURL": "http://127.0.0.1:8787/v1",
+        "apiKey": "masqai-local"
+      },
+      "models": {
+        "google/gemini-3.8-flash": {
+          "name": "Exhibition model"
+        }
+      }
+    }
+  },
+  "enabled_providers": [
+    "masqai"
+  ]
+}
