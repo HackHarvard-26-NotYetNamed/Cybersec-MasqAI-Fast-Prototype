@@ -81,6 +81,40 @@ See [`masqai.json.example`](masqai.json.example). Unknown keys are rejected at l
 - **retention**: `idle_ttl_h` (12) and `max_sessions` (50, LRU). Busy sessions are never evicted, and Forget on a
   busy session returns `409`.
 
+### Key Enigma (rotating OpenRouter keys)
+
+Add a `key_enigma` block to the OpenRouter provider (design: [`KeyEnigma.OpenRouter.doc.md`](KeyEnigma.OpenRouter.doc.md)):
+
+```json
+{ "name": "openrouter", "base_url": "https://openrouter.ai/api", "format": "openai",
+  "key_enigma": { "enabled": true, "instance_id": "3f9a1c07", "workspace_id": "<your Enigma workspace UUID>",
+                  "custody": { "mode": "passphrase" } } }
+```
+
+- Required: `instance_id` (8 hex characters, generated once and kept: it names this install's keys),
+  `workspace_id` (a dedicated OpenRouter workspace **with a budget**; startup refuses one without), and
+  `custody.mode` (`passphrase` or `device`; there is no default, and no plaintext mode).
+- Optional: `interval_seconds` (900, minimum 300), `jitter` (0.2), `per_key_limit_usd` (2), `failure_policy`
+  (`closed`; or `open`), `drain_cap_seconds` (default: `upstream_timeout_seconds`), `custody.vault_path`
+  (default `~/.masqai/openrouter.vault`).
+- `base_url` must be on `https://openrouter.ai`. `api_key_env` is not used while rotation is on.
+- These settings are fixed at startup: the GUI shows them, and refuses edits to them.
+
+Passphrase mode: seal the management key once, then start the gateway from a terminal.
+
+```bash
+python -m masqai.vault seal       # prompts (hidden) for the management key and a passphrase (14+ characters)
+python -m masqai.vault verify     # opens the vault and checks the key with OpenRouter
+python -m masqai.vault repass     # change the passphrase
+python -m masqai.vault destroy    # overwrite and delete the vault
+python run_gateway.py             # asks for the passphrase before serving; 3 attempts
+```
+
+`seal` checks that the key is a management key and records its expiry; the gateway warns 7 days and 1 day before
+it. Without an interactive terminal the gateway refuses to start; there is no passphrase environment variable. If
+the passphrase is forgotten, delete the management key on OpenRouter, create a new one and `seal` again.
+Device mode is not built yet (build steps 7–8).
+
 `user`, `metadata.user_id`, `safety_identifier` and `prompt_cache_key` are always replaced with a per-session
 pseudonym (`masq-` + 128 random bits). Other `metadata` keys pass.
 

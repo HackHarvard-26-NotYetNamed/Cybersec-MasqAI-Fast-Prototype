@@ -238,6 +238,9 @@ class FakeBackend:
         self.leftovers: list[str] = []          # hashes cleanup() should report as removed
         self.mint_errors: list[Exception] = []  # popped one per mint
         self.healthy = True
+        self.detail = ""
+        self.management_expires_at = None
+        self.closed = False
         self._seq = 0
 
     async def mint(self, *, suffix: str, expires_at, limit_usd: float):
@@ -264,7 +267,8 @@ class FakeBackend:
         return count
 
     async def status(self):
-        return self._status(mode=self.mode, healthy=self.healthy)
+        return self._status(mode=self.mode, healthy=self.healthy, detail=self.detail,
+                            management_expires_at=self.management_expires_at)
 
     async def aclose(self) -> None:
-        pass
+        self.closed = True

@@ -2,3 +2,6 @@ fastapi>=0.115
 httpx>=0.27
 pydantic>=2.7
 uvicorn[standard]>=0.30
+# Key Enigma passphrase vault (masqai/custody/vault.py): AES-256-GCM and Argon2id
+cryptography>=42
+argon2-cffi>=23.1

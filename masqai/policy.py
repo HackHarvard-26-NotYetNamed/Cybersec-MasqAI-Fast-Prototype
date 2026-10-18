@@ -28,7 +28,7 @@ class Category:
 CATEGORIES: tuple[Category, ...] = (
     Category("credentials", "Credentials", "secret",
              "API keys, tokens, passwords, private keys, connection strings and webhooks",
-             frozenset({"PRIVATE_KEY", "JWT", "OR_KEY", "ANTHROPIC_KEY", "OPENAI_KEY", "AWS_KEY", "AWS_SECRET", "STRIPE_KEY",
+             frozenset({"PRIVATE_KEY", "JWT", "OR_KEY", "ADMIN_KEY", "ANTHROPIC_KEY", "OPENAI_KEY", "AWS_KEY", "AWS_SECRET", "STRIPE_KEY",
                         "GOOGLE_KEY", "SLACK_TOKEN", "SLACK_WEBHOOK", "GITHUB_TOKEN", "GITLAB_TOKEN", "NPM_TOKEN", "HF_TOKEN",
                         "PYPI_TOKEN", "DO_TOKEN", "SHOPIFY_TOKEN", "SENDGRID_KEY", "CREDENTIAL", "CREDENTIALS", "BEARER_TOKEN",
                         "SECRET", "PASSWORD", "PASSPHRASE", "TOKEN", "KEY", "API_KEY", "CERTIFICATE", "FINGERPRINT"})),

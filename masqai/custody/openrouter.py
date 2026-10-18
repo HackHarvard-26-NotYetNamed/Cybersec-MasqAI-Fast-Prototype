@@ -117,6 +117,7 @@ class OpenRouterKeys:
         return self._client
 
     async def aclose(self) -> None:
+        self._key = ""   # no further calls; drop this reference to the management key
         if self._client is not None:
             client, self._client = self._client, None
             await client.aclose()
@@ -124,6 +125,8 @@ class OpenRouterKeys:
     async def _call(self, method: str, path: str, *, params: dict[str, Any] | None = None, body: dict[str, Any] | None = None) -> Any:
         if not any(m == method and rx.fullmatch(path) for m, rx in ALLOWED):
             raise CustodyError(f"management client refuses {method} {path}")
+        if not self._key:
+            raise ManagementAuthError("the management client is closed")
         headers = {"authorization": f"Bearer {self._key}", "accept": "application/json"}
         try:
             async with self._http().stream(method, API + path, params=params, json=body, headers=headers) as response:

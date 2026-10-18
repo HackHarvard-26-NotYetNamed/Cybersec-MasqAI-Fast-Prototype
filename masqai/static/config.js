@@ -60,6 +60,8 @@ const ConfigPanel = (() => {
       api_key_env: p.api_key_env.trim() || null,
       format: p.format,
       headers: Object.fromEntries(p.headers.filter((x) => x.name.trim() || x.value).map((x) => [x.name.trim(), x.value])),
+      // Key Enigma settings are fixed at startup (edit masqai.json); carried through unchanged.
+      ...(p.key_enigma ? { key_enigma: p.key_enigma } : {}),
     }));
     cfg.routes = Object.fromEntries(draft.routes.map((r) => [r.alias.trim(), { provider: r.provider, model: r.model.trim() || null }]));
     cfg.default_route = draft.default_route.provider

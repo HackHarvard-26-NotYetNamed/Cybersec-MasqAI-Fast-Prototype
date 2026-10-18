@@ -67,6 +67,13 @@ def create_app(config: GatewayConfig, *, admin_token: str | None = None, playgro
 
     store = SessionStore()
     keyring = keyring or KeyRing()
+    # A provider configured for rotation must never fall back to its static env key (fail closed).
+    missing = [p.name for p in config.providers if p.rotates and not keyring.rotates(p.name)]
+    if missing:
+        raise ValueError(f"key_enigma is enabled for {', '.join(missing)} but no rotating key source was given; "
+                         "start the gateway with run_gateway.py, which opens the custody backend")
+    # Key Enigma settings are fixed at startup: the custody backend was opened for exactly these.
+    startup_enigma = enigma_blocks(config)
     sanitizer = Sanitizer(config, keyring)
     traces = TraceLog()
     subscribers: set[asyncio.Queue] = set()
@@ -274,6 +281,14 @@ def create_app(config: GatewayConfig, *, admin_token: str | None = None, playgro
                     raise ConfigReferenceError(("providers", index, "api_key_env"),
                                                f"{provider.api_key_env!r} was not referenced in masqai.json at startup; "
                                                f"choose one of {sorted(env_names)} or restart")
+            changed = enigma_blocks(candidate)
+            if changed != startup_enigma:
+                names = [p.name for p in candidate.providers]
+                diff = [n for n in set(changed) | set(startup_enigma) if changed.get(n) != startup_enigma.get(n)]
+                index = next((names.index(n) for n in diff if n in names), 0)
+                raise ConfigReferenceError(("providers", index, "key_enigma"),
+                                           "Key Enigma settings are fixed at startup (the custody backend was opened for "
+                                           "them); edit masqai.json and restart")
             for field in GatewayConfig.model_fields:
                 setattr(config, field, getattr(candidate, field))
         except Exception as exc:
@@ -596,6 +611,11 @@ def scrub(text: str, values: list[tuple[str, str]]) -> str:
             for form in {value, json.dumps(value, ensure_ascii=False)[1:-1]}:
                 text = text.replace(form, placeholder)
     return text
+
+
+def enigma_blocks(config: GatewayConfig) -> dict[str, Any]:
+    """{provider name: (its key_enigma block, base_url if it rotates)} for providers that have a key_enigma block."""
+    return {p.name: (p.key_enigma.model_dump(), p.base_url if p.rotates else None) for p in config.providers if p.key_enigma}
 
 
 def public_config(config: GatewayConfig) -> dict[str, Any]:

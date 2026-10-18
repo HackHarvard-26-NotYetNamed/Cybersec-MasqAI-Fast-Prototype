@@ -58,6 +58,64 @@ def validation_errors(exc: Exception) -> list[dict[str, Any]]:
     return [{"loc": [], "msg": str(exc)}]
 
 
+class CustodyConfig(BaseModel):
+    """Where the OpenRouter management key is kept (KeyEnigma.OpenRouter.doc.md §3). There is no default mode and no
+    plaintext mode: the user chooses "passphrase" (an encrypted vault on this host) or "device" (an ESP32)."""
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["passphrase", "device"]
+    vault_path: str | None = None          # passphrase: default ~/.masqai/openrouter.vault
+    serial_port: str | None = None         # device
+    device_id: str | None = None           # device
+    pairing_file: str | None = None        # device: default ~/.masqai/device-<id>.pair
+
+    @field_validator("vault_path", "serial_port", "device_id", "pairing_file", mode="before")
+    @classmethod
+    def _blank_is_none(cls, value: Any) -> Any:
+        return None if value == "" else value
+
+    @model_validator(mode="after")
+    def _mode_fields(self) -> "CustodyConfig":
+        if self.mode == "device" and not (self.serial_port and self.device_id):
+            raise ValueError("device custody needs serial_port and device_id")
+        return self
+
+
+ENIGMA_ORIGIN = "https://openrouter.ai"
+
+
+class KeyEnigmaConfig(BaseModel):
+    """Continuous rotation of this provider's upstream key (KeyEnigma.OpenRouter.doc.md §9). Fixed at startup."""
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    kind: Literal["openrouter"] = "openrouter"
+    instance_id: str = Field(pattern=r"^[0-9a-f]{8}$")
+    workspace_id: str = Field(pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+    interval_seconds: float = Field(900.0, ge=300)
+    jitter: float = Field(0.2, ge=0, le=0.5)
+    drain_cap_seconds: float | None = Field(None, gt=0)   # None: the upstream timeout (no request outlives it)
+    per_key_limit_usd: float = Field(2.0, gt=0, le=1000)
+    failure_policy: Literal["closed", "open"] = "closed"
+    custody: CustodyConfig
+
+    @model_validator(mode="before")
+    @classmethod
+    def _helpful_required(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if not data.get("instance_id"):
+                import secrets
+                raise ValueError(f"key_enigma.instance_id is required: 8 hex characters, generated once per install "
+                                 f"and kept (it names this install's keys). For example: \"{secrets.token_hex(4)}\"")
+            if not data.get("workspace_id"):
+                raise ValueError("key_enigma.workspace_id is required: the id of a dedicated OpenRouter workspace "
+                                 "that has a budget")
+            custody = data.get("custody")
+            if not isinstance(custody, dict) or custody.get("mode") in (None, ""):
+                raise ValueError('key_enigma.custody.mode is required: "passphrase" or "device" (there is no default)')
+        return data
+
+
 class ProviderConfig(BaseModel):
     """Keys are referenced by environment variable only (the filesystem is untrusted).
     A provider without api_key_env sends no credentials, e.g. a local Ollama server."""
@@ -68,6 +126,21 @@ class ProviderConfig(BaseModel):
     api_key_env: str | None = None
     format: Literal["openai", "anthropic"] = "openai"
     headers: dict[str, str] = Field(default_factory=dict)
+    key_enigma: KeyEnigmaConfig | None = None
+
+    @property
+    def rotates(self) -> bool:
+        return bool(self.key_enigma and self.key_enigma.enabled)
+
+    @model_validator(mode="after")
+    def _enigma_origin(self) -> "ProviderConfig":
+        # A rotated key is an OpenRouter key: it must never be sent to any other host.
+        if self.rotates:
+            from urllib.parse import urlsplit
+            parts = urlsplit(self.base_url)
+            if f"{parts.scheme}://{parts.netloc}".lower() != ENIGMA_ORIGIN:
+                raise ValueError(f"provider {self.name!r}: key_enigma (kind openrouter) needs base_url on {ENIGMA_ORIGIN}")
+        return self
 
     @model_validator(mode="before")
     @classmethod

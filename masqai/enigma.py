@@ -80,6 +80,9 @@ class KeyRing:
     def source(self, provider: ProviderConfig) -> KeySource:
         return self._sources.get(provider.name) or EnvKeySource(provider)
 
+    def rotates(self, name: str) -> bool:
+        return name in self._sources
+
     def lease(self, provider: ProviderConfig) -> KeyLease:
         return self.source(provider).lease()
 
@@ -233,9 +236,10 @@ class EnigmaKeySource:
     SECRET_TYPE = "OR_KEY"
 
     def __init__(self, name: str, backend: ManagementBackend, policy: RotationPolicy | None = None, *,
-                 clock: Clock | None = None, probe: Probe | None = None, rng: Any = None) -> None:
+                 clock: Clock | None = None, probe: Probe | None = None, rng: Any = None, owns_backend: bool = False) -> None:
         self.name = name
         self.backend = backend
+        self.owns_backend = owns_backend             # close (and wipe) the backend when the source stops
         self.policy = policy or RotationPolicy()
         self.clock = clock or SystemClock()
         self.probe = probe or _default_probe
@@ -258,6 +262,8 @@ class EnigmaKeySource:
         self._cooldown_until = 0.0
         self._wake = asyncio.Event()                 # set by report_rejected: mint now instead of on schedule
         self.cleaned_up = 0
+        self.management_expires_at: datetime | None = None
+        self._expiry_warned: set[str] = set()
 
     # ---------- leases: synchronous, on the request path ----------
     def lease(self) -> KeyLease:
@@ -346,10 +352,13 @@ class EnigmaKeySource:
             loop.call_soon_threadsafe(fn, *args)
 
     def known_secrets(self) -> list[tuple[str, str]]:
-        """Every key value that may still work: active, standby, draining, and revoked but not confirmed dead."""
+        """Every key value that may still work: active, standby, draining, and revoked but not confirmed dead. Plus
+        the backend's own secret (passphrase mode: the management key, as ADMIN_KEY)."""
         now = self.clock.utcnow()
+        own = getattr(self.backend, "known_secrets", None)
         with self._lock:
-            return [(r.minted.key, self.SECRET_TYPE) for r in self._records if r.minted.expires_at > now]
+            keys = [(r.minted.key, self.SECRET_TYPE) for r in self._records if r.minted.expires_at > now]
+        return (own() if own else []) + keys
 
     @property
     def active(self) -> KeyRecord | None:
@@ -402,6 +411,17 @@ class EnigmaKeySource:
         """
         self._loop = asyncio.get_running_loop()
         self._wake = asyncio.Event()
+        # The management key must be a management key, and the workspace must exist and have a budget (owner
+        # decision, §7). Checked before anything is created.
+        try:
+            status = await self.backend.status()
+        except Exception as exc:   # noqa: BLE001
+            raise KeyUnavailable(f"could not check the key backend for {self.name}: {type(exc).__name__}: {logs_safe(str(exc))}") from None
+        if not status.healthy:
+            self._event("backend_unhealthy", detail=status.detail)
+            raise KeyUnavailable(f"the key backend for {self.name} is not ready: {logs_safe(status.detail)}")
+        self.management_expires_at = status.management_expires_at
+        self._check_management_expiry()
         try:
             self.cleaned_up = await self.backend.cleanup()
             self._event("cleanup", detail=f"{self.cleaned_up} leftover key(s) revoked")
@@ -428,6 +448,22 @@ class EnigmaKeySource:
         self._after_swap(None)
         self._task = asyncio.create_task(self._run(), name=f"enigma-{self.name}")
 
+    def _check_management_expiry(self) -> None:
+        """Warn once at 7 days and once at 1 day before the management key expires (§3.3)."""
+        expires = self.management_expires_at
+        if expires is None:
+            return
+        left = (expires - self.clock.utcnow()).total_seconds()
+        for mark, seconds in (("1d", 86400.0), ("7d", 7 * 86400.0)):
+            if left <= seconds:
+                if mark not in self._expiry_warned:
+                    self._expiry_warned.update({"1d", "7d"} if mark == "1d" else {"7d"})
+                    detail = "expired" if left <= 0 else f"expires in {left / 3600:.0f} h"
+                    self._event("management_key_expiring", detail=detail)
+                    logs.log.warning("enigma %s: the management key %s; create a new one and re-seal (python -m masqai.vault)",
+                                     self.name, detail)
+                return
+
     async def stop(self) -> None:
         """Refuse new leases, stop rotating, and revoke every key that may still work (best effort, bounded)."""
         with self._lock:
@@ -445,6 +481,12 @@ class EnigmaKeySource:
                                                       return_exceptions=True), timeout=15)
             except asyncio.TimeoutError:
                 logs.log.warning("enigma %s: shutdown revocation timed out; the remaining keys die at expires_at", self.name)
+        if self.owns_backend:
+            # Passphrase mode: closes the management client and wipes the management key's bytearray.
+            try:
+                await self.backend.aclose()
+            except Exception:   # noqa: BLE001
+                logs.log.warning("enigma %s: closing the key backend failed", self.name)
 
     # ---------- the rotation loop ----------
     async def _run(self) -> None:
@@ -483,6 +525,7 @@ class EnigmaKeySource:
                         retired = self._swap_locked()
                 self._after_swap(retired)
                 self._prune()
+                self._check_management_expiry()
         except asyncio.CancelledError:
             raise
         except Exception:   # noqa: BLE001 - leases still stop at the deadline
@@ -704,11 +747,38 @@ class EnigmaKeySource:
             "propagation_seconds": ({"count": len(delays), "min": delays[0], "median": delays[len(delays) // 2], "max": delays[-1]}
                                     if delays else {"count": 0}),
             "cleaned_up": self.cleaned_up,
+            "custody": getattr(self.backend, "mode", None),
+            "management_expires_at": self.management_expires_at.isoformat() if self.management_expires_at else None,
             "events": list(self.events),
         }
 
 
 _KEYISH = re.compile(r"sk-[A-Za-z0-9_-]{8,}")
+
+
+def policy_for(provider: ProviderConfig, upstream_timeout_seconds: float) -> RotationPolicy:
+    """The rotation policy for a provider's key_enigma block. The drain cap defaults to the upstream timeout."""
+    enigma = provider.key_enigma
+    if enigma is None:
+        raise ValueError(f"provider {provider.name!r} has no key_enigma block")
+    return RotationPolicy(interval_seconds=enigma.interval_seconds, jitter=enigma.jitter,
+                          drain_cap_seconds=enigma.drain_cap_seconds or upstream_timeout_seconds,
+                          per_key_limit_usd=enigma.per_key_limit_usd, failure_policy=enigma.failure_policy)
+
+
+def build_keyring(config: Any, backends: dict[str, ManagementBackend], **source_options: Any) -> KeyRing:
+    """One EnigmaKeySource per provider with key_enigma enabled, on the backend opened for it (run_gateway opens
+    them before uvicorn starts). The sources own their backends: stopping one closes it (and wipes the key)."""
+    sources: dict[str, KeySource] = {}
+    for provider in config.providers:
+        if not provider.rotates:
+            continue
+        if provider.name not in backends:
+            raise ValueError(f"no key backend was opened for provider {provider.name!r}")
+        sources[provider.name] = EnigmaKeySource(provider.name, backends[provider.name],
+                                                 policy_for(provider, config.upstream_timeout_seconds),
+                                                 owns_backend=True, **source_options)
+    return KeyRing(sources)
 
 
 def rejection_reason(status: int, body: bytes) -> str | None:

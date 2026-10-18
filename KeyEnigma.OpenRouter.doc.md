@@ -139,13 +139,14 @@ The vault is `custody.vault_path`, by default `~/.masqai/openrouter.vault`. It c
 
 ```json
 { "v": 1, "kdf": "argon2id", "m_kib": 262144, "t": 3, "p": 4,
-  "salt": "<16 random bytes, b64>", "nonce": "<12 random bytes, b64>",
-  "ct": "<AES-256-GCM ciphertext+tag, b64>", "created": "2026-10-18T12:00:00Z", "hint": "openrouter management" }
+  "salt": "<16 random bytes, b64>", "nonce": "<12 random bytes, b64>", "provider": "openrouter",
+  "created": "2026-10-18T12:00:00Z", "management_expires_at": "2027-01-31T23:59:59Z", "hint": "openrouter management",
+  "ct": "<AES-256-GCM ciphertext+tag, b64>" }
 ```
 
-- The encryption key is `Argon2id(passphrase, salt, m=256 MiB, t=3, p=4)` → 32 bytes. That takes about 1 s on a
-  laptop and makes offline guessing expensive. These parameters are stronger than RFC 9106's second recommended
-  setting (64 MiB).
+- The encryption key is `Argon2id(passphrase, salt, m=256 MiB, t=3, p=4)` → 32 bytes. Measured: about 0.15 s on the
+  dev laptop (the earlier estimate was 1 s); the cost is the 256 MiB per guess. These parameters are stronger than
+  RFC 9106's second recommended setting (64 MiB).
 - Every header field except `ct` is bound into the encryption as **associated data**. Changing any of them, for
   example lowering `m_kib` to make guessing cheaper, makes decryption fail.
 - Salt and nonce come from `secrets.token_bytes`. A fresh nonce is used every time the vault is re-sealed.
@@ -172,7 +173,7 @@ Other commands:
 `run_gateway.py` prompts with `getpass` before uvicorn starts.
 - **If there is no TTY, the gateway refuses to start**, failing closed. There is deliberately no
   `MASQAI_VAULT_PASSPHRASE` env var, because that would put a plaintext secret back in the environment.
-- 3 wrong attempts → exit. Wrong attempts cost about 1 s each because of Argon2.
+- 3 wrong attempts → exit. Each wrong attempt costs one Argon2 derivation.
 - The decrypted key is kept in a `bytearray` and wiped when the gateway shuts down. Python may keep internal copies,
   for example inside `httpx` header strings, so the guarantee is "only in RAM", not "erased from RAM".
 
@@ -714,7 +715,36 @@ Results go into a new "OpenRouter facts" table in this document and update the d
      the cleanup count and the last 50 events. It contains no key values and no full hashes.
    - Mutation check for steps 4–5: 14 weakened guards, all caught. The step 3 mutation check was re-run after the
      loop changes and still catches all 14.
-6. **Passphrase mode:** the vault, the CLI, `PassphraseBackend`, and the startup prompt.
+6. **Passphrase mode:** the vault, the CLI, `PassphraseBackend`, and the startup prompt. **Done 2026-10-18:**
+   - Code:
+     - `masqai/custody/vault.py`: the format, `seal`/`unseal`, atomic owner-only writes, and the CLI
+       `python -m masqai.vault seal|verify|repass|destroy`.
+     - `masqai/custody/passphrase.py`: `PassphraseBackend`, which is `DirectBackend` plus the management key as an
+       `ADMIN_KEY` secret, wiped on close.
+     - `KeyEnigmaConfig`/`CustodyConfig` in `masqai/config.py`; `build_keyring`/`policy_for` in `masqai/enigma.py`.
+     - `run_gateway.py` opens the backends before uvicorn.
+   - **Refinements of §3.1:**
+     - The header also carries `provider` and the management key's stated expiry. Both are authenticated.
+     - The Argon2 cost must lie between 64 MiB and 1 GiB, and the field set is exact; both are checked before any
+       KDF work.
+     - Passphrases are NFC-normalized.
+     - `seal` reads the expiry from `GET /api/v1/key` (the OpenAPI example shows `expires_at` there) and asks only
+       if it is missing.
+   - **Startup order:** check the backend (management key, workspace, budget), then clean up, then mint the first
+     key. If the backend is not ready, nothing else runs.
+   - **Expiry warnings** at T-7d and T-1d, each once, as a log line and a status event.
+   - **Config:** `key_enigma` is validated per §9, but `delete_unknown` is left out until the intruder check exists.
+     - The block can't be edited at runtime, since the backend was opened for it. The base URL must be
+       `https://openrouter.ai`.
+     - A rotating provider never falls back to its env key: `create_app` refuses one without a rotating source.
+     - **The §9 bootstrap fallback is not built.** Even under `open`, a failed first mint fails startup instead of
+       using `api_key_env`. That fallback would bring back the static key Key Enigma exists to remove (the more
+       secure option, DECISIONS.md).
+   - Measured on this laptop: one Argon2id derivation at the default cost takes about 0.15 s, so 3 wrong attempts
+     cost under 1 s. That is fast enough for startup and still memory-hard for an offline guesser (256 MiB per
+     guess).
+   - Tests: `tests/test_vault.py`, 52 tests (1 POSIX-only, skipped on Windows). A mutation check (30 weakened
+     guards) had every one caught. The step 2–5 mutation checks still catch all of theirs.
 7. **Device mode, firmware logic:** `policy.py`, `proto.py` and `journal.py`, tested under CPython.
 8. **Device mode, hardware side:** the adapter layer on the ESP32 (Wi-Fi, TLS, NVS, the clock via NTP) and the
    `enroll` CLI. Run a bench test on the real board.

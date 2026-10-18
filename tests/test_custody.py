@@ -45,9 +45,11 @@ class Protocols(unittest.TestCase):
         for custody in ({}, {"mode": None}, {"mode": "env"}, {"mode": "plaintext"}):
             with self.assertRaisesRegex(CustodyError, "no default"):
                 load_backend(custody)
-        for mode in ("passphrase", "device"):   # chosen, but not built yet: refuse rather than fall back
-            with self.assertRaisesRegex(CustodyError, "not built yet"):
-                load_backend({"mode": mode})
+        # device is chosen but not built yet: refuse rather than fall back
+        with self.assertRaisesRegex(CustodyError, "not built yet"):
+            load_backend({"mode": "device", "serial_port": "COM5", "device_id": "esp32-a1b2c3d4"})
+        with self.assertRaisesRegex(CustodyError, "workspace_id"):
+            load_backend({"mode": "passphrase"})   # passphrase mode is built (tests/test_vault.py)
 
     def test_expiry_is_formatted_with_seconds_in_utc(self):
         when = datetime(2026, 10, 18, 21, 5, 7, 999, tzinfo=timezone(timedelta(hours=8)))

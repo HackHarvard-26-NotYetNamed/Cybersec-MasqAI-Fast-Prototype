@@ -144,6 +144,35 @@ Design and owner decisions: `KeyEnigma.OpenRouter.doc.md`. The owner agreed to s
   are the gateway's own secrets, not the user's data.
   - They come from RAM (`KeyRing.known_secrets()`), never from `custom_values`, which `/api/config` shows.
   - The status API shows labels and hash prefixes only.
+- **Step 6 (done): passphrase custody.** The vault (`masqai/custody/vault.py`) is AES-256-GCM under an
+  Argon2id(256 MiB, t=3, p=4) key. Every header field is authenticated as associated data.
+  - **The Argon2 cost has a floor (64 MiB) and a ceiling (1 GiB), and the field set is exact.** Both are checked
+    before any work. A file edited to make guessing cheap, or to make unlocking hang, is refused as malformed, not
+    tried.
+  - The stated management-key expiry is inside the authenticated header, so it can't be moved to silence the
+    warnings.
+  - Passphrases are NFC-normalized, so the same passphrase typed on another keyboard or OS still opens the vault.
+  - **Secrets are typed, never passed.** `seal`, `verify`, `repass` and the gateway read them with `getpass`, and
+    only on a real terminal. Without one they refuse, since `getpass` may otherwise echo. No argument or
+    environment variable carries a secret.
+  - `seal` refuses an existing vault, an inference key (`is_management_key` must be true), a passphrase under 14
+    characters, and one that contains the key or is part of it.
+  - Written atomically to a temp file in the same folder. The ACL is owner-only with inheritance removed
+    (`icacls /inheritance:r`) on Windows, and the mode is 0600 on POSIX. This is best effort and warns rather than
+    fails, since the encryption is the protection.
+  - **Startup checks the backend before touching anything.** The management key, the workspace and its budget are
+    checked first. If any is not ready, nothing is cleaned up or minted.
+  - The management key is masked as `ADMIN_KEY`, always, in content and logs. It is wiped from its `bytearray` when
+    the gateway stops, and the management client drops its reference and refuses further calls. Python may still
+    hold copies elsewhere, so the guarantee is "only in RAM".
+  - **A rotating provider never falls back to its env key.** `create_app` refuses a provider with `key_enigma`
+    enabled but no rotating source. The base URL must be `https://openrouter.ai`, so a rotated key can't be sent to
+    another host. The design's optional bootstrap fallback to `api_key_env` under `open` is not built.
+  - **Key Enigma settings are fixed at startup.** The backend was opened for them, so the config API refuses any
+    change to a `key_enigma` block, and to a rotating provider's base URL or name. The GUI carries the block
+    through unchanged.
+  - `run_gateway.py` opens every backend before uvicorn starts and passes `workers=1` explicitly.
+  - Device mode still refuses with "not built yet" (steps 7–8).
 
 ## Eval harness
 

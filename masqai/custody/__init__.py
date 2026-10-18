@@ -1,8 +1,8 @@
 """Management-key custody for Key Enigma (design: KeyEnigma.OpenRouter.doc.md §3).
 
-The rotation state machine (enigma.py, build step 3) talks only to a `ManagementBackend`. Two backends are planned:
-`passphrase` (the management key is decrypted into gateway RAM; step 6) and `device` (the key stays on an ESP32;
-steps 7-8). Both expose the same five operations, so rotation logic does not depend on where the key lives.
+The rotation state machine (enigma.py) talks only to a `ManagementBackend`. Two backends: `passphrase` (the
+management key is decrypted into gateway RAM; passphrase.py, step 6) and `device` (the key stays on an ESP32;
+steps 7-8). Both expose the same operations, so rotation logic does not depend on where the key lives.
 
 There is deliberately no plaintext env-var backend; tests use an in-memory fake (tests/helpers.py).
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Literal, Mapping, Protocol, runtime_checkable
+from typing import Any, Callable, Literal, Mapping, Protocol, runtime_checkable
 
 CUSTODY_MODES = ("passphrase", "device")
 
@@ -77,10 +77,22 @@ class ManagementBackend(Protocol):
     async def aclose(self) -> None: ...
 
 
-def load_backend(custody: Mapping[str, Any]) -> ManagementBackend:
-    """Open the backend the user chose. There is no default mode: the choice is explicit (owner decision)."""
-    mode = custody.get("mode")
+def load_backend(custody: Any, *, workspace_id: str | None = None, instance_id: str | None = None,
+                 prompt: Callable[[str], str] | None = None, transport: Any = None) -> ManagementBackend:
+    """Open the backend the user chose. There is no default mode: the choice is explicit (owner decision).
+
+    `custody` is a key_enigma.custody block (a CustodyConfig or a plain mapping). Passphrase mode prompts for the
+    passphrase through `prompt` (default: getpass on a real terminal, refusing without one)."""
+    if hasattr(custody, "model_dump"):
+        custody = custody.model_dump()
+    mode = custody.get("mode") if isinstance(custody, Mapping) else None
     if mode not in CUSTODY_MODES:
         raise CustodyError(f"key_enigma.custody.mode must be one of {', '.join(CUSTODY_MODES)} (got {mode!r}); there is no default")
-    step = {"passphrase": 6, "device": 8}[mode]
-    raise CustodyError(f"custody mode {mode!r} is not built yet (KeyEnigma build step {step}); Key Enigma cannot start")
+    if mode == "device":
+        raise CustodyError("custody mode 'device' is not built yet (KeyEnigma build step 8); Key Enigma cannot start")
+    if not workspace_id or not instance_id:
+        raise CustodyError("passphrase custody needs the workspace_id and instance_id from key_enigma")
+    from .passphrase import open_passphrase_backend
+    from .vault import tty_prompt
+    return open_passphrase_backend(vault_path=custody.get("vault_path"), workspace_id=workspace_id,
+                                   instance_id=instance_id, prompt=prompt or tty_prompt, transport=transport)
