@@ -93,14 +93,14 @@ export const STOPS: Stop[] = [
     seconds: 60,
     cues: [
       "Real agent · 6 tasks · planted secrets · Daytona sandbox per command, network blocked",
-      "Without MasqAI: 29 of 30 runs leaked; all 30 tasks still worked: silent",
+      "Without MasqAI: 45 of 48 runs leaked; 47 of 48 tasks still worked: silent",
       "With MasqAI: 0 of 48 runs leaked, 46 of 48 tasks still done (security model: Gemini Flash, remote)",
       "Close: MasqAI protects the context, Daytona contains the actions · scan the QR",
     ],
     handoff: "Thank you.",
     lines: [
       "We measured it with a real AI agent on six coding tasks, each with secrets planted in its files. Every command the agent ran executed in a fresh Daytona sandbox, with its network blocked, deleted afterwards. So even if the model tried something malicious, it couldn't reach the internet.",
-      "Without MasqAI, 29 of 30 runs leaked a planted secret to the model. And all 30 tasks still succeeded: the leak is completely silent.",
+      "Without MasqAI, 45 of 48 runs leaked a planted secret to the model. And 47 of 48 tasks still succeeded: the leak is completely silent.",
       "With MasqAI, 0 of 48 runs leaked, and 46 of 48 tasks still succeeded. For this eval the security model was Gemini Flash, run remotely.",
       "MasqAI protects the context. Daytona contains the actions. It runs on your machine, and you can try it right now on our site. Thank you.",
     ],
