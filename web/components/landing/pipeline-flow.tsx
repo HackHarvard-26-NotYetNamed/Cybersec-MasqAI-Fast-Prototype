@@ -90,20 +90,36 @@ export function PipelineFlow() {
             {step.title}
           </motion.p>
         </AnimatePresence>
-        <p className="inline-flex items-center gap-2 rounded-full border border-leak/50 bg-leak/8 px-3 py-1 text-sm">
-          <Ban aria-hidden className="size-4 text-leak" />
-          Timeout, bad answer or full context: <strong className="font-semibold">blocked, nothing sent</strong>
+        <p className="inline-flex items-center gap-2 rounded-full border border-leak/50 bg-leak/8 px-3 py-1 text-xs sm:text-sm">
+          <Ban aria-hidden className="size-4 shrink-0 text-leak" />
+          <span>
+            Timeout, bad answer or full context: <strong className="font-semibold">blocked, nothing sent</strong>
+          </span>
         </p>
       </div>
       <figure
         aria-label="A request through MasqAI: detectors, automatic masks and the local security model mask the context before the untrusted model sees it; its tool calls are checked, then restored on your machine."
-        className="overflow-x-auto rounded-xl border bg-card p-4 sm:p-6"
+        className="hidden overflow-x-auto rounded-xl border bg-card p-4 sm:p-6 md:block"
       >
         <div className="min-w-[760px] space-y-4">
           <Lane nodes={OUT} active={step.stage} direction="out" dimmed={returning && step.stage !== "untrusted"} />
           <Lane nodes={BACK} active={step.stage} direction="back" dimmed={!returning} />
         </div>
       </figure>
+
+      {/* Phones: the same stages as a row of chips instead of the wide two-lane diagram. */}
+      <ol aria-hidden className="flex flex-wrap gap-1.5 md:hidden">
+        {[...OUT, ...[...BACK].reverse()].map((node) => {
+          const Icon = node.icon;
+          const active = node.id === step.stage;
+          return (
+            <li key={node.id} className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors", active ? "border-restored bg-restored/15 text-foreground" : "text-muted-foreground")}>
+              <Icon className={cn("size-3.5", active && "text-restored")} />
+              {node.label}
+            </li>
+          );
+        })}
+      </ol>
 
       <div className="grid gap-4 lg:grid-cols-[1.15fr_1fr]">
         <Packet stage={step.stage} />

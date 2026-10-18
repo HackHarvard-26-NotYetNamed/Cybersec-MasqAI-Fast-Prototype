@@ -56,12 +56,23 @@ export default function Home() {
           <div className="mt-6">
             <DaytonaRuns />
           </div>
-          <div className="mt-5 flex flex-wrap gap-3">
-            <Link href="/results" className="inline-flex min-h-11 items-center gap-2 rounded-md border bg-card px-5 font-medium hover:bg-accent">
-              See the numbers <ArrowRight aria-hidden className="size-4" />
-            </Link>
-            <Link href="/how-it-works#daytona-title" className="inline-flex min-h-11 items-center gap-2 rounded-md border bg-card px-5 font-medium hover:bg-accent">
-              How we use Daytona
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-4">
+            <div className="flex flex-wrap gap-3">
+              <Link href="/results" className="inline-flex min-h-11 items-center gap-2 rounded-md border bg-card px-5 font-medium hover:bg-accent">
+                See the numbers <ArrowRight aria-hidden className="size-4" />
+              </Link>
+              <Link href="/how-it-works#daytona-title" className="inline-flex min-h-11 items-center gap-2 rounded-md border bg-card px-5 font-medium hover:bg-accent">
+                How we use Daytona
+              </Link>
+            </div>
+            {/* The close of the pitch: "try it right now on our site". */}
+            <Link href="/try" className="flex items-center gap-4 rounded-xl border bg-card p-3 pr-5 hover:bg-accent/40">
+              {/* eslint-disable-next-line @next/next/no-img-element -- a static SVG, scaled crisp */}
+              <img src="/qr-try.svg" alt="QR code for masqai.vercel.app/try" width={104} height={104} className="rounded-md" />
+              <span>
+                <span className="block text-lg font-semibold">Try it now</span>
+                <span className="font-mono text-sm text-muted-foreground">masqai.vercel.app/try</span>
+              </span>
             </Link>
           </div>
         </div>
@@ -94,7 +105,9 @@ export default function Home() {
 
       <section aria-labelledby="secret-intel" className="border-t bg-card/40">
         <div className="mx-auto grid max-w-7xl gap-4 px-4 py-14 sm:px-6 md:grid-cols-2">
-          <h2 id="secret-intel" className="sr-only">Secret vs. intel</h2>
+          <h2 id="secret-intel" className="text-3xl font-semibold tracking-tight md:col-span-2 sm:text-4xl">
+            Secrets are masked. Intel is hidden.
+          </h2>
           <Kind
             icon={<KeyRound aria-hidden className="size-5 text-leak" />}
             title="Secret"
