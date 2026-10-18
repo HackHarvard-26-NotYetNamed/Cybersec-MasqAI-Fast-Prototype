@@ -123,7 +123,8 @@ function ResultsBody({ data }: { data: Results }) {
             Honesty note
           </h2>
           <p className="mt-3 text-lg text-pretty">
-            Lower exposure, not zero: a 7B local model misses things.
+            Lower exposure, not zero. In these runs the security model was remote (see Methodology), so it saw the raw
+            context; run locally, it never leaves your machine.
           </p>
         </section>
       </div>

@@ -62,7 +62,7 @@ export function DaytonaRuns() {
         </div>
         <p className="mt-4 flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground">
           <ShieldCheck aria-hidden className="size-4 text-restored" />
-          With MasqAI: the same 30 runs, being measured now
+          With MasqAI (8 runs per task, security model Gemini 3.8 Flash): 0 of 48 leaked, 46 of 48 tasks done
         </p>
       </div>
     </div>
