@@ -172,7 +172,43 @@ Design and owner decisions: `KeyEnigma.OpenRouter.doc.md`. The owner agreed to s
     change to a `key_enigma` block, and to a rotating provider's base URL or name. The GUI carries the block
     through unchanged.
   - `run_gateway.py` opens every backend before uvicorn starts and passes `workers=1` explicitly.
-  - Device mode still refuses with "not built yet" (steps 7–8).
+- **Steps 7–8 (done 2026-10-18; bench with FAKE keys): device custody.** The management key lives only on the ESP32
+  (`firmware/esp32/`). The host holds a pairing file with the frame key and the unlock secret, never the key.
+  - **The device decides, the host asks.** Names, expiry (from OpenRouter's TLS-authenticated `Date` header, never
+    the host's clock or NTP), the per-key limit, rate limits, the live-key cap and the revoke scope are enforced in
+    firmware.
+  - **Over-cap requests are refused, not clamped.** A gateway asking for more than the device allows fails at
+    startup (`check_rotation`), not silently with shorter keys.
+  - **Rate limits survive reboots.** They are computed from the journal in flash, not from RAM.
+  - **A mint whose answer was lost still counts as live** until its expiry, since the key may exist.
+  - **Frames are MACed over the exact bytes sent**, with a direction tag, a rising counter and a fresh session per
+    HELLO. **Every HELLO relocks the device**, so a new process on the port can't inherit an unlocked session.
+  - **Secrets on the wire are encrypted** under a per-session key, on top of the MAC. Enrollment uses an X25519
+    exchange plus a 6-digit code a person compares; the CLI asks for the management key only after the codes match.
+  - **There is no op that returns a secret or a file.** Unknown ops are refused. The command loop catches everything
+    and reports only the exception type.
+  - The serial transport opens with DTR/RTS deasserted and never toggles them (§13.2).
+  - **Bench-only exceptions (owner decisions, 2026-10-18):**
+    - A TCP link, because there is no USB-TTL adapter.
+    - A one-shot `/enigma/bench_enroll` file instead of holding BOOT.
+    - Both live only in `firmware/esp32/bench/` and the `tcp://` transport, which prints a warning wherever it is
+      used. Production `main.py` serves UART2 only.
+  - The bench uses only FAKE keys: a LAN fake OpenRouter over TLS 1.2, with a throwaway CA and a certificate for
+    `openrouter.ai`. A run with a real management key waits for step 9.
+  - **Memory on a no-PSRAM ESP32 (§13.6).** The board's USB cable carries no data, so reflashing a frozen build was
+    not possible; the owner chose to split and slim the firmware instead (2026-10-18):
+    - Enrollment code and X25519 load only in an enrollment window and are unloaded after it.
+    - `heap.pregrow()` grows the Python heap once, early, by 34 KB, by briefly holding system heap with a UART2
+      receive buffer. Measured trade-off: 45 KB starved TLS, 26 KB starved Python in an enrollment session.
+    - The more secure choice where it mattered: a TLS call is **refused** (`NETWORK`, not sent) when either heap is
+      short, instead of being attempted; a collapsed system heap **resets** the production board, which relocks it
+      (fail-closed). The bench app stops instead of resetting, so OTA stays reachable.
+    - A frozen MicroPython build, or a board with PSRAM, is the recommended production fix.
+  - **Command timeout 45 s** (was 20 s): on the bench Wi-Fi about 1 TLS call in 20 took 7–15 s, and a REVOKE can be
+    two calls.
+  - The ESP32-OTA launcher is the owner's and is not modified (owner rule: it is the only way to reach the board).
+    Every bench `/app.py` waits 5 s before doing anything (owner rule).
+  - Not built: the optional passphrase wrap of the pairing file (§13.3).
 
 ## Eval harness
 

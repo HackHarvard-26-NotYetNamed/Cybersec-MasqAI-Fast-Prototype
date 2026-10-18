@@ -11,7 +11,7 @@
 | 5 | Freeze: injection set + report, `DECISIONS.md`, README sections | `tests/test_injection.py`; docs written | done |
 | — | Eval harness on Daytona (`eval/`) | self-test smoke passes; `tests/test_eval.py` passes | done; real N=10/N=20 runs pending (needs `DAYTONA_API_KEY`, an upstream key, `qwen2.5:7b`) |
 | — | Public site (`web/`) | `npm run build`, Lighthouse a11y 100 on `/` and `/demo` | done; real `results.json` pending the eval |
-| stretch | Key Enigma (OpenRouter first; design in `KeyEnigma.OpenRouter.doc.md` §12) | `tests/test_enigma.py`, `test_custody.py`, `test_rotation.py`, `test_enigma_policy.py`, `test_vault.py` pass per step | in progress: steps 1–6 of 10 done (key leases; fenced key-management client; rotation; failure policy, emergency rotation, cleanup; masking + status API; passphrase vault + CLI + startup wiring); ESP32 TLS name check proven; owner agreed 2026-10-18 |
+| stretch | Key Enigma (OpenRouter first; design in `KeyEnigma.OpenRouter.doc.md` §12) | `tests/test_enigma.py`, `test_custody.py`, `test_rotation.py`, `test_enigma_policy.py`, `test_vault.py`, `test_device_firmware.py`, `test_device.py` pass per step | in progress: steps 1–8 done (steps 7–8, ESP32 device custody: CPython tests, and on the board with FAKE keys: enroll, 17/17 run checks, a 102-handshake soak); next is step 9 (real API probe); owner agreed 2026-10-18 |
 | stretch | Honeytoken canary (separate module behind a flag) | — | not started |
 
 ## Layout
@@ -32,9 +32,10 @@ masqai/
   replay.py       per-request records and the public site's replay export
   model.py, trace.py, observer.py, upstream.py, logs.py, config.py
   enigma.py       Key Enigma: KeyRing / key leases; EnigmaKeySource (rotation, drain, fail-closed)
-  custody/        Key Enigma management-key custody: ManagementBackend protocol; openrouter.py (fenced key-management client); vault.py + passphrase.py (passphrase vault, `python -m masqai.vault`)
+  custody/        Key Enigma management-key custody: ManagementBackend protocol; openrouter.py (fenced key-management client); vault.py + passphrase.py (passphrase vault, `python -m masqai.vault`); device.py (ESP32 backend, pairing, `python -m masqai.device`)
   static/         the GUI (vanilla JS): ui, app, context, security, mapping, config
 run_gateway.py    CLI: --config, --playground; prints the token URL
+firmware/esp32/   Key Enigma device firmware (MicroPython): enigma_dev/ (pure logic + hw.py adapter), main.py, bench/ (bench-only app, fake OpenRouter, driver, self-test)
 tests/            unit + end-to-end tests; tests/injection/ (fixtures + runner)
 eval/             the Daytona harness (see eval/README.md)
 playground/       six agent workspaces + the untrusted relay

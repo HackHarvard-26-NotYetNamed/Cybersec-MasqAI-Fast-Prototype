@@ -78,6 +78,10 @@ def main(argv: list[str] | None = None) -> int:
         # From here the key sources own the backends: the app's lifespan closes them (and wipes the key).
         try:
             keyring = build_keyring(config, backends)
+        except CustodyError as exc:
+            close_backends(backends)
+            print(f"masqai: Key Enigma cannot start: {exc}", file=sys.stderr)
+            return 2
         except BaseException:
             close_backends(backends)
             raise

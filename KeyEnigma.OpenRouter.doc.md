@@ -428,7 +428,8 @@ keys die on schedule.
 
 **Q: What if the device is unplugged, crashes or loses Wi-Fi?** *(device mode)*
 The gateway's `DeviceBackend` handles it as follows:
-- Each command has a 20 s timeout, which leaves room for one TLS handshake plus OpenRouter's response.
+- Each command has a 45 s timeout. That leaves room for a REVOKE (DELETE, then PATCH) on a slow link: on the bench,
+  about 1 TLS call in 20 took 7–15 s (step 8).
 - The device is pinged every 30 s.
 - When the device can't be reached, it is treated like a failed mint: `failure_policy` applies. With the default
   `closed`, traffic stops when the active key's interval ends.
@@ -745,9 +746,120 @@ Results go into a new "OpenRouter facts" table in this document and update the d
      guess).
    - Tests: `tests/test_vault.py`, 52 tests (1 POSIX-only, skipped on Windows). A mutation check (30 weakened
      guards) had every one caught. The step 2–5 mutation checks still catch all of theirs.
-7. **Device mode, firmware logic:** `policy.py`, `proto.py` and `journal.py`, tested under CPython.
+7. **Device mode, firmware logic:** `policy.py`, `proto.py` and `journal.py`, tested under CPython. **Done
+   2026-10-18:**
+   - Code in `firmware/esp32/enigma_dev/`. These modules are pure and run under both MicroPython and CPython:
+     - `crypto.py`: HMAC-SHA256 and HKDF; AES-256-CTR built on AES-ECB (`cryptolib` mode 1, so it does not depend on
+       the optional CTR mode); encrypt-then-MAC `seal`/`open_sealed`.
+     - `x25519.py`: pure-Python X25519, used once per enrollment.
+     - `enroll.py`: `ENROLL_BEGIN`, `ENROLL_SET`, `ENROLL_ERASE`. Imported only while an enrollment window is open, and
+       dropped from `sys.modules` (with `x25519.py`) when it closes, so run mode does not hold that code in RAM (§13.6).
+     - `heap.py`: the memory controls from the step 8 bench (§13.6).
+     - `timeutil.py`: calendar arithmetic, the HTTP `Date` header and ISO times, without the RTC.
+     - `httpwire.py`: one HTTP/1.1 request per connection, with responses capped at 8 KB (`RESP_TOO_LARGE`).
+     - `policy.py`, `journal.py`, `orapi.py` (OpenRouter calls and the server clock), `proto.py` (frames).
+     - `core.py`: the command state machine (`Device.handle(line) -> reply`).
+   - **Refinements of §13.4:**
+     - **Frame MAC:** a frame is `<b64 mac> <payload JSON>`. The MAC covers a direction tag plus the **exact payload
+       bytes**, not a canonical re-encoding, so MicroPython and CPython never have to agree on JSON formatting. The
+       tags are H (HELLO reply), Q (request) and R (reply), so a frame can't be reflected in the other direction.
+     - **Secrets in payloads** (inference keys, the unlock secret, enrollment secrets) are also AES-256-CTR encrypted
+       under a separate per-session key: HKDF yields 64 bytes, a MAC key and an encryption key.
+     - **Every HELLO relocks the device.** The host proves itself again with UNLOCK, which is cheap and makes no
+       network call. A second process on the port therefore can't inherit an unlocked session.
+     - **Enrollment confidentiality:** `ENROLL_BEGIN` runs an X25519 exchange, and both ends show a 6-digit code
+       derived from the session keys. A person compares the codes before the CLI asks for the management key.
+     - `CHECK` is a new op: the same readiness check as passphrase mode (management key, workspace, budget), run by
+       the device. `DeviceBackend.status()` uses it.
+   - **Refinements of §13.5:**
+     - Money crosses the wire as integer cents, because ESP32 floats are single precision.
+     - **A ttl or limit above the cap is refused, not shortened**, so a misconfigured gateway fails at startup.
+     - The emergency bucket is a gap rule: a mint closer than `min_mint_gap_s` to the previous one uses one of 3 burst
+       slots per 10 min.
+     - Rate limits are computed from the journal in flash and OpenRouter's clock, so a reboot does not reset them.
+     - The journal entry is written **before** the POST. A mint whose answer is lost stays `pending` and counts
+       against `max_live_keys` until it expires. A definite refusal removes the entry.
+     - The device also checks a granted key's name, besides its expiry, limit and workspace; a mismatch is revoked at
+       once.
+     - Clock: when the RTC (NTP) and OpenRouter's `Date` differ by more than 5 min, the device refuses with
+       `CLOCK_SKEW`. Without NTP, the `Date` header alone is enough. If the server clock is over 1 h stale, any
+       authenticated GET refreshes it first.
+   - The command loop catches every exception and answers `INTERNAL` with the exception type only. No values are
+     included.
+   - Tests: `tests/test_device_firmware.py`, 41 tests:
+     - RFC 5869, RFC 7748 and SP 800-38A vectors, plus interop with `cryptography`;
+     - time round trips against the standard library;
+     - HTTP framing and size caps;
+     - every policy rule;
+     - the journal, including torn lines;
+     - the state machine: enrollment window, unlock, MAC, replay, reflection, revoke scope, a reboot keeping the rate
+       limits, a mint lost in flight, clock skew, no-secret status, and the absence of read-file or dump ops.
 8. **Device mode, hardware side:** the adapter layer on the ESP32 (Wi-Fi, TLS, NVS, the clock via NTP) and the
-   `enroll` CLI. Run a bench test on the real board.
+   `enroll` CLI. Run a bench test on the real board. **Done 2026-10-18 (bench, FAKE keys):**
+   - **Host:** `masqai/custody/device.py` holds `DeviceBackend`, the pairing file, the transports and the CLI
+     `python -m masqai.device enroll|status|unpair --port …`.
+     - `load_backend` opens device mode.
+     - `build_keyring` calls `check_rotation`, so a config whose ttl or limit exceeds the device policy fails at
+       startup (exit 2) and the device is relocked.
+     - `custody.device_id` must look like `esp32-xxxxxxxx`.
+   - **Pairing file:** `~/.masqai/device-<id>.pair`, owner-only, same ACL code as the vault. It has an exact field
+     set: device id, `k_mac`, `unlock_secret`, workspace, instance, policy, management expiry, transport, created.
+     - Not built: the optional passphrase wrap of the pairing file (§13.3).
+   - **Serial transport:** opened with DTR and RTS deasserted, and never toggled.
+   - **TCP transport (`tcp://HOST:PORT`):** **bench only**, printed as a warning everywhere it is used. Owner decision:
+     there is no USB-TTL adapter on the bench.
+   - **Firmware:**
+     - `hw.py`:
+       - flash files under `/enigma/`, with fixed names and atomic rename;
+       - Wi-Fi, NTP;
+       - verified TLS (`ValueError` → `TLS_VERIFY_FAILED`);
+       - BOOT held 3 s opens the window;
+       - the watchdog;
+       - `UartLink` (UART2) and a bench-only `TcpLink`.
+     - `main.py` serves UART2 only.
+     - `bench/app.py` runs the same core over TCP inside the ESP32-OTA launcher.
+       - Owner decision: the bench enrollment window opens through a one-shot `/enigma/bench_enroll` file instead of
+         the button.
+   - Tests: `tests/test_device.py`, 23 tests. They run the host backend against the real firmware core on a fake
+     board. They cover:
+     - mint, revoke and usage;
+     - policy refusals and foreign keys;
+     - surviving a device reboot, unplugging, and a tampered reply;
+     - the CLI (enroll, mismatched codes, a non-management key, status, unpair);
+     - DTR/RTS;
+     - `run_gateway` refusing a config beyond the device policy;
+     - a full `EnigmaKeySource` rotation through the device.
+   - **Bench results** (board 192.168.219.225, ESP32 without PSRAM, MicroPython v1.27.0 under the owner's ESP32-OTA
+     launcher, firmware compiled to `.mpy` by `mpy-cross` 1.27, LAN fake OpenRouter with FAKE keys):
+     - **On-board self-test: 9/9 pass** (`bench/selftest.py`): HKDF, AES-256-CTR (SP 800-38A), X25519 (RFC 7748),
+       seal/open, dates, chunked HTTP, the size cap, policy and frames. X25519 takes **590 ms** on the board, once per
+       enrollment.
+     - The fake OpenRouter speaks TLS 1.2 with a throwaway CA and a certificate for `openrouter.ai`, dialed by IP but
+       verified by name. It must be **TLS 1.2 only**, to match what the board negotiated with the real openrouter.ai.
+     - **`drive.py enroll`: passed** in 8.4 s (key exchange, matching 6-digit codes, then the board checked the key,
+       the workspace and its budget over 3 TLS calls).
+     - **`drive.py run`: 17/17 passed:** HELLO + UNLOCK; CHECK; MINT (name and expiry built on the device, key
+       delivered encrypted); OpenRouter recorded the device's limit and expiry; USAGE; `POLICY_LIMIT` and
+       `POLICY_TTL` refusals; revoke scope (a foreign key is refused); 3 burst mints then `LIVE_KEYS`; REVOKE; the
+       PATCH-disabled fallback when DELETE fails; CLEANUP spares the owner's key; a revoked management key makes
+       CHECK unhealthy (`MGMT_AUTH`); `aclose` relocks and wipes the host copy; a wrong pairing secret and a wrong
+       unlock secret are both refused.
+     - **`drive.py soak`: passed:** 34 CHECKs = 102 TLS handshakes in 172 s; the device's reported free memory stayed
+       flat (48,864 bytes at every sample); OTA stayed reachable.
+     - **The open problem was memory** (§13.6): MicroPython grew its heap into the system heap that mbedTLS needs.
+       Fixed in firmware without reflashing: `enroll.py`/`x25519.py` split out, a bounded early heap growth
+       (`heap.pregrow`, 34 KB), and guards that refuse a TLS call when either heap is short.
+     - **Firmware bugs found on the board:** `Exception.__init__(self, …)` raises `AttributeError` on MicroPython (all
+       firmware exceptions now use `super().__init__`); a TLS handshake without enough system heap stalls for tens
+       of seconds or fails with `MBEDTLS_ERR_SSL_CONN_EOF`/`ENOMEM`, and starves other tasks on the board.
+     - **Slow calls happen:** on the bench Wi-Fi (ping 31–291 ms), about 1 call in 20 took 7–15 s, and one handshake
+       timed out on the fake's side. The command timeout is therefore 45 s (§8); a REVOKE can be DELETE + PATCH.
+   - Not yet run: the real openrouter.ai refusing a fake key (step 9), the production `main.py` with UART2 and the
+     watchdog (needs a USB-TTL adapter), and the 100 mint/revoke cycle soak (the policy allows a mint per 240 s, so it
+     takes about 7 h; the soak above counts handshakes instead).
+   - Tests: `tests/test_device_firmware.py` and `tests/test_device.py`, 72 tests together. A mutation check (47
+     weakened guards across the firmware and the host backend: MACs, counters, relock, policy caps, journal scope,
+     sealing, enrollment checks, the reply checks on the host) had every one caught.
 9. The probe script against the real API, then tune the defaults.
 10. Export to `keys.json`, then switch `/trust` to `status: "live"`.
 
@@ -1002,6 +1114,44 @@ Notes and open checks:
   **`ValueError`** ("The certificate is not correctly signed by the trusted CA"), **not `OSError`**. The device's
   HTTPS wrapper must catch both and map them to `TLS_VERIFY_FAILED`. If it doesn't, a verification failure crashes
   the command loop instead of failing closed.
+- **Firmware rules from the step 8 bench (2026-10-18):**
+  - `Exception.__init__(self, …)` raises `AttributeError` on MicroPython. Use `super().__init__(…)`.
+  - The TLS handshake is done on a **blocking** socket, and the 15 s timeout is set only after the handshake. A
+    socket in timeout mode during the handshake is a suspect for stalls.
+  - Pure-Python X25519 costs 590 ms. A TLS call to a LAN server usually costs 1.3–3 s.
+- **Memory on an ESP32 without PSRAM (measured on the bench, 2026-10-18).** This was the step 8 blocker.
+  - There are two heaps. The **Python heap** starts at 56 KB. The **system heap** (about 87 KB free at boot) is
+    where mbedTLS, lwIP and Wi-Fi allocate. One TLS handshake peaks at about **31 KB** of system heap, the largest
+    piece about 16 KB.
+  - MicroPython grows the Python heap on demand, by min(largest free system block, current heap size): about
+    **59 KB in one step**, leaving about 28 KB. With that left, a handshake stalls for tens of seconds or fails with
+    `MBEDTLS_ERR_SSL_CONN_EOF`; later allocations by other tasks fail too (the OTA listener died each time).
+  - The firmware needs about 39 KB of Python heap in run mode (`core` 10 KB, `hw` 6 KB, `orapi` 6 KB, the rest
+    2–3.5 KB each), on top of what is already loaded (the ESP32-OTA launcher takes about 20 KB). Loading it always
+    triggered the 59 KB growth. Enrollment adds about 5 KB (`enroll.py`, `x25519.py`) plus X25519's big integers.
+  - On this port `gc.mem_free()` **includes the largest free system block** (the heap could grow into it). The real
+    free Python heap is `gc.mem_free()` minus that block (`heap.py_free()`).
+  - **Fixes, all in firmware (no reflash; the bench board's USB cable carries no data):**
+    1. `enroll.py` and `x25519.py` are imported only in an enrollment window, X25519 is dropped right after
+       `ENROLL_BEGIN`, and both are dropped from `sys.modules` when the window closes.
+    2. `heap.pregrow()` grows the Python heap **once, early, by a bounded amount**: it holds part of the largest
+       system block with a UART2 receive buffer (allocated by the IDF driver), allocates until MicroPython adds an
+       area, keeps one object there (an empty area is freed at the next collection), then releases the UART. The
+       IDF driver refuses a receive buffer above about 64 KB (`ESP_FAIL`), which bounds how small a growth can be
+       forced.
+       - 45 KB left about 40 KB of system heap: calls were slow and another task's allocation failed.
+       - 26 KB left about 60 KB, but only about 6 KB of real Python heap in an enrollment session, so the next large
+         allocation triggered the uncontrolled 59 KB growth (680 bytes of system heap left; TLS `ENOMEM`).
+       - **34 KB** (the default) leaves about **53 KB** of system heap and about 16 KB of real Python heap in an
+         enrollment session. All bench runs above used it.
+    3. `Board.https` refuses a call (`NETWORK`, `sent=False`, so a mint is not journalled as possibly created) unless
+       there are at least 36 KB of system heap, an 18 KB block, and 10 KB of real Python heap. A short heap fails
+       cleanly instead of stalling the board.
+    4. If the system heap still collapses (under 16 KB), the command loop resets the board (production, watchdog
+       mode). That relocks it; the host re-authenticates. The bench app only stops instead, so OTA stays reachable.
+  - A board **with PSRAM** avoids all of this: the Python heap lives in PSRAM. The cleanest fix for a no-PSRAM board
+    is a custom MicroPython build with `enigma_dev` frozen into flash, so the code costs no heap at all. That needs a
+    USB data cable (not available on the bench).
 
 ### 13.7 Limits we accept
 

@@ -45,8 +45,8 @@ class Protocols(unittest.TestCase):
         for custody in ({}, {"mode": None}, {"mode": "env"}, {"mode": "plaintext"}):
             with self.assertRaisesRegex(CustodyError, "no default"):
                 load_backend(custody)
-        # device is chosen but not built yet: refuse rather than fall back
-        with self.assertRaisesRegex(CustodyError, "not built yet"):
+        # device mode is built (tests/test_device.py): it still needs the ids, and a pairing file
+        with self.assertRaisesRegex(CustodyError, "workspace_id"):
             load_backend({"mode": "device", "serial_port": "COM5", "device_id": "esp32-a1b2c3d4"})
         with self.assertRaisesRegex(CustodyError, "workspace_id"):
             load_backend({"mode": "passphrase"})   # passphrase mode is built (tests/test_vault.py)

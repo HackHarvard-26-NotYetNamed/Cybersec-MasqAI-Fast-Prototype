@@ -775,8 +775,11 @@ def build_keyring(config: Any, backends: dict[str, ManagementBackend], **source_
             continue
         if provider.name not in backends:
             raise ValueError(f"no key backend was opened for provider {provider.name!r}")
-        sources[provider.name] = EnigmaKeySource(provider.name, backends[provider.name],
-                                                 policy_for(provider, config.upstream_timeout_seconds),
+        policy = policy_for(provider, config.upstream_timeout_seconds)
+        check = getattr(backends[provider.name], "check_rotation", None)
+        if check is not None:   # device mode: the firmware's caps must allow this rotation (§9), checked before start
+            check(ttl_seconds=policy.ttl_seconds, per_key_limit_usd=policy.per_key_limit_usd)
+        sources[provider.name] = EnigmaKeySource(provider.name, backends[provider.name], policy,
                                                  owns_backend=True, **source_options)
     return KeyRing(sources)
 

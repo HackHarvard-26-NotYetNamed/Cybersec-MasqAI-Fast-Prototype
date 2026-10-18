@@ -1,8 +1,8 @@
 """Management-key custody for Key Enigma (design: KeyEnigma.OpenRouter.doc.md §3).
 
 The rotation state machine (enigma.py) talks only to a `ManagementBackend`. Two backends: `passphrase` (the
-management key is decrypted into gateway RAM; passphrase.py, step 6) and `device` (the key stays on an ESP32;
-steps 7-8). Both expose the same operations, so rotation logic does not depend on where the key lives.
+management key is decrypted into gateway RAM; passphrase.py) and `device` (the key stays on an ESP32; device.py).
+Both expose the same operations, so rotation logic does not depend on where the key lives.
 
 There is deliberately no plaintext env-var backend; tests use an in-memory fake (tests/helpers.py).
 """
@@ -88,10 +88,15 @@ def load_backend(custody: Any, *, workspace_id: str | None = None, instance_id: 
     mode = custody.get("mode") if isinstance(custody, Mapping) else None
     if mode not in CUSTODY_MODES:
         raise CustodyError(f"key_enigma.custody.mode must be one of {', '.join(CUSTODY_MODES)} (got {mode!r}); there is no default")
-    if mode == "device":
-        raise CustodyError("custody mode 'device' is not built yet (KeyEnigma build step 8); Key Enigma cannot start")
     if not workspace_id or not instance_id:
-        raise CustodyError("passphrase custody needs the workspace_id and instance_id from key_enigma")
+        raise CustodyError(f"{mode} custody needs the workspace_id and instance_id from key_enigma")
+    if mode == "device":
+        from .device import open_device_backend
+        if not custody.get("serial_port") or not custody.get("device_id"):
+            raise CustodyError("device custody needs serial_port and device_id")
+        return open_device_backend(serial_port=custody["serial_port"], device_id=custody["device_id"],
+                                   pairing_file=custody.get("pairing_file"), workspace_id=workspace_id,
+                                   instance_id=instance_id, transport=transport)
     from .passphrase import open_passphrase_backend
     from .vault import tty_prompt
     return open_passphrase_backend(vault_path=custody.get("vault_path"), workspace_id=workspace_id,

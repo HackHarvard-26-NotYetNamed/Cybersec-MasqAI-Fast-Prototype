@@ -113,7 +113,29 @@ python run_gateway.py             # asks for the passphrase before serving; 3 at
 `seal` checks that the key is a management key and records its expiry; the gateway warns 7 days and 1 day before
 it. Without an interactive terminal the gateway refuses to start; there is no passphrase environment variable. If
 the passphrase is forgotten, delete the management key on OpenRouter, create a new one and `seal` again.
-Device mode is not built yet (build steps 7–8).
+
+Device mode: the management key lives on an ESP32 (`firmware/esp32/README.md` covers flashing and wiring).
+
+```bash
+# Power on while holding BOOT for 3 s (opens a 120 s enrollment window), then:
+python -m masqai.device enroll --port COM5    # compare the 6-digit code; prompts (hidden) for the key and Wi-Fi
+python -m masqai.device status --port COM5 --device-id esp32-1a2b3c4d
+python -m masqai.device unpair --port COM5 --device-id esp32-1a2b3c4d   # needs a new BOOT window
+```
+
+```json
+"custody": { "mode": "device", "serial_port": "COM5", "device_id": "esp32-1a2b3c4d" }
+```
+
+- `instance_id` and `workspace_id` must match what was enrolled. The pairing file defaults to
+  `~/.masqai/device-<id>.pair` (`custody.pairing_file` overrides it).
+- Startup refuses a `per_key_limit_usd` or key lifetime (interval × 1.2 + 60 + drain + 120 s) above the device
+  policy (default $2 and 1900 s).
+- Wiring: the gateway host reaches the board only through a 3.3 V USB-TTL adapter (TX→GPIO16, RX→GPIO17, GND; DTR
+  and RTS not connected). The board's USB port goes to a charger, never to the gateway host.
+- `--port tcp://HOST:7777` is for the bench only (no adapter) and prints a warning.
+- Each device command may take up to 45 s (a slow TLS call on the board's Wi-Fi). A board without PSRAM is tight on
+  memory: see `firmware/esp32/README.md` before changing the firmware.
 
 `user`, `metadata.user_id`, `safety_identifier` and `prompt_cache_key` are always replaced with a per-session
 pseudonym (`masq-` + 128 random bits). Other `metadata` keys pass.

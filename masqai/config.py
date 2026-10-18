@@ -76,8 +76,11 @@ class CustodyConfig(BaseModel):
 
     @model_validator(mode="after")
     def _mode_fields(self) -> "CustodyConfig":
-        if self.mode == "device" and not (self.serial_port and self.device_id):
-            raise ValueError("device custody needs serial_port and device_id")
+        if self.mode == "device":
+            if not (self.serial_port and self.device_id):
+                raise ValueError("device custody needs serial_port and device_id")
+            if not re.fullmatch(r"esp32-[0-9a-f]{8}", self.device_id):
+                raise ValueError("custody.device_id must look like esp32-1a2b3c4d (printed by python -m masqai.device enroll)")
         return self
 
 
